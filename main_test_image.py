@@ -27,7 +27,9 @@ API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
 DEFAULT_SCREENSHOT = "matching_lobby_screen.png"
 SCREENSHOT_FILES = [
     "matching_lobby_screen.png",  # 기본 테스트 이미지
-    # "another_screenshot.png",   # 추가로 테스트할 이미지
+    "test2.png",   # 추가로 테스트할 이미지
+    "test3.png", 
+    "test4.png",
 ]
 
 
