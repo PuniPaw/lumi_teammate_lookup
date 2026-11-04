@@ -21,6 +21,9 @@ from teammate_ocr import get_teammate_ocr_results
 load_dotenv()
 API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
 
+# 팀원 한 명당 API로 확인해 볼 OCR 후보 최대 개수
+MAX_CANDIDATES = 8
+
 
 def resolve_teammate_names(client: Client, ocr_results: list[dict]) -> list[dict]:
     """OCR 결과 리스트를 받아서, 각 팀원마다 실제로 존재하는 닉네임과
@@ -39,9 +42,11 @@ def resolve_teammate_names(client: Client, ocr_results: list[dict]) -> list[dict
     for result in ocr_results:
         region_name = result["name"]
 
-        # variants 딕셔너리 값들을 후보로 사용 (중복 제거하되 순서는 유지)
-        candidates = list(dict.fromkeys(result["variants"].values()))
-        candidates = [c for c in candidates if c]  # 빈 문자열 제외
+        # OCR이 점수 높은 순으로 정렬해 둔 후보를 앞에서부터 시도
+        # (예전 형식의 결과면 variants 값을 사용). API 호출이 너무 많아지지
+        # 않도록 상위 MAX_CANDIDATES개만 시도합니다.
+        candidates = result.get("candidates") or list(result["variants"].values())
+        candidates = list(dict.fromkeys(c for c in candidates if c))[:MAX_CANDIDATES]
 
         found_nickname = None
         found_user_id = None

@@ -18,6 +18,13 @@ from dotenv import load_dotenv
 from bserpy import Client
 from bserpy.utils import SeasonHelper
 
+from recent_stats import (
+    RECENT_GAME_COUNT,
+    empty_recent_stats,
+    format_recent_stats,
+    get_recent_stats,
+)
+
 
 # .env 파일에서 API 키 로드
 load_dotenv()
@@ -288,6 +295,14 @@ def _fetch_single_user_stats(client, nickname: str, season_id) -> Dict:
     except Exception as e:
         print(f"  통계 조회 실패: {e}")
 
+    # 최근 N게임 평균 딜량 / 평균 TK
+    try:
+        recent = get_recent_stats(client, user_num, count=RECENT_GAME_COUNT)
+        print(f"  {nickname}: {format_recent_stats(recent)}")
+    except Exception as e:
+        print(f"  최근 게임 조회 실패: {e}")
+        recent = empty_recent_stats()
+
     return {
         "nickname": nickname,
         "tier": tier,
@@ -301,6 +316,7 @@ def _fetch_single_user_stats(client, nickname: str, season_id) -> Dict:
         "average_rank": average_rank,
         "user_id": str(user_num),
         "season_id": season_id,
+        **recent,
     }
 
 
@@ -319,6 +335,7 @@ def _failed_stats(nickname: str) -> Dict:
         "average_rank": 0,
         "user_id": None,
         "season_id": None,
+        **empty_recent_stats(),
     }
 
 class TeammateRow(QFrame):
@@ -346,6 +363,11 @@ class TeammateRow(QFrame):
         self.detail_line = QLabel()
         self.detail_line.setStyleSheet("color: #cccccc; font-size: 10px;")
         layout.addWidget(self.detail_line)
+
+        # 최근 N게임 평균 딜량 / 평균 TK
+        self.recent_line = QLabel()
+        self.recent_line.setStyleSheet("color: #8ecae6; font-size: 10px;")
+        layout.addWidget(self.recent_line)
 
         self.status_line = QLabel("")
         self.status_line.setStyleSheet("color: #ff6b6b; font-size: 10px;")
@@ -382,6 +404,12 @@ class TeammateRow(QFrame):
         """stats 딕셔너리를 받아 tier_line/detail_line UI를 갱신하는 단일 진입점"""
         self.tier_line.setText(self._build_tier_text(stats))
         self.detail_line.setText(self._build_detail_text(stats))
+        if stats.get("user_id"):
+            self.recent_line.setText(format_recent_stats(stats))
+            self.recent_line.show()
+        else:
+            # 유저 조회 자체가 실패한 경우엔 '기록 없음'이 오해를 줄 수 있어 숨김
+            self.recent_line.hide()
 
     def _on_nickname_submitted(self):
         new_nickname = self.nickname_edit.text().strip()
