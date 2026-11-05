@@ -20,8 +20,8 @@ import time
 
 import psutil
 
-# TODO: 작업 관리자에서 확인한 실제 프로세스 이름으로 바꾸세요.
-GAME_PROCESS_NAME = "EternalReturn-Win64-Shipping.exe"
+# 이터널 리턴 게임 프로세스 이름 (작업 관리자 -> 세부 정보 탭의 '이름')
+GAME_PROCESS_NAME = "EternalReturn.exe"
 
 # 게임이 켜지면 실행할 스크립트 (같은 폴더 기준)
 OVERLAY_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_overlay.py")
