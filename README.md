@@ -14,25 +14,27 @@
    pip install -r requirements.txt
    ```
    닉네임 OCR은 PaddleOCR(PP-OCRv5) 인식 모델을 RapidOCR(ONNX)로 돌립니다. 처음 실행할 때 모델 파일 약 30MB를 ModelScope에서 받습니다.
-2. 저장소 폴더에 `.env` 파일
+2. 저장소 폴더에 `.env` 파일 (개발용. 키가 있으면 Open API를 직접 호출합니다)
    ```
    ETERNAL_RETURN_API_KEY=발급받은 키
    ```
+   배포판은 키 없이 프록시 서버(`LUMI_API_URL`, 기본값 `lumi/config.py`의 `DEFAULT_API_URL`)로 조회합니다. 키를 exe에 넣으면 누구나 꺼내 쓸 수 있어서, 키는 프록시에만 둡니다.
 
 ## 실행
 
 ```
 python -m lumi
 ```
-게임이 켜지면 앱(`lumi.app`)이 자동으로 실행됩니다. 게임 창을 맨 앞에 두세요 (화면을 보이는 그대로 캡처합니다).
+게임이 켜지면 앱(`lumi.app`)이 자동으로 실행됩니다. 게임 창을 맨 앞에 두세요 (화면을 보이는 그대로 캡처합니다). 감시 없이 앱만 실행하려면 `python -m lumi --app`.
 
 ## 설정
 
-`.env` 또는 환경 변수로 바꿀 수 있습니다 (`lumi/config.py`).
+`.env` 또는 환경 변수로 바꿀 수 있습니다 (`lumi/config.py`). `.env`와 `debug/` 폴더는 개발할 때 저장소 폴더, exe로 빌드하면 `%APPDATA%\lumi\`에 있습니다.
 
 | 환경 변수 | 설명 | 기본값 |
 |---|---|---|
-| `ETERNAL_RETURN_API_KEY` | Open API 키 (필수) | |
+| `ETERNAL_RETURN_API_KEY` | Open API 키 (개발용, 있으면 직접 호출) | |
+| `LUMI_API_URL` | API 프록시 주소 (키가 없을 때 사용) | `DEFAULT_API_URL` |
 | `LUMI_DEBUG` | 디버그 출력/이미지 저장 (`1`로 켬) | 꺼짐 |
 | `LUMI_GAME_PROCESS` | 게임 프로세스 이름 | `EternalReturn.exe` |
 | `LUMI_GAME_WINDOW_TITLE` | 게임 창 제목 (부분 일치) | `Eternal Return` |
@@ -50,7 +52,8 @@ lumi/
   capture/          screen.py 닉네임 칸 위치 계산과 캡처 (LiveScreen, ImageScreen)
   ocr/              paddle.py PP-OCR (PaddleReader), image.py 테두리 제거/빈 칸 판별,
                     chars.py 문자 종류, candidates.py 잡음 후보/비슷한 글자
-  api/              resolve.py 닉네임 확정, player_stats.py 전적 (EternalReturnStats), recent_stats.py 최근 20게임
+  api/              client.py API 클라이언트(직접/프록시), resolve.py 닉네임 확정,
+                    player_stats.py 전적 (EternalReturnStats), recent_stats.py 최근 20게임
   ui/               overlay.py 모달
   debug/            store.py 디버그 이미지, crops.py / check.py 확인 도구
 tests/              fixtures/ 실제 게임 화면

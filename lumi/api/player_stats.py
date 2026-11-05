@@ -5,11 +5,11 @@
 '조회 실패' dict를 만들어, 모달에서 닉네임을 고쳐 재조회할 수 있게 합니다.
 """
 
-from typing import Callable, Optional
+from typing import Optional
 
-from bserpy import Client
 from bserpy.utils import SeasonHelper
 
+from lumi.api.client import ClientFactory
 from lumi.api.recent_stats import RECENT_GAME_COUNT, empty_recent_stats, format_recent_stats, get_recent_stats
 from lumi.api.resolve import resolve_teammate_names
 
@@ -102,15 +102,11 @@ def fetch_user_stats(client, nickname: str, season_id: int, character_names: dic
 
 
 class EternalReturnStats:
-    """ports.StatsProvider 구현 (이터널 리턴 Open API)."""
+    """ports.StatsProvider 구현 (이터널 리턴 Open API, 직접 또는 프록시로: api.client)."""
 
-    def __init__(self, api_key: str, client_factory: Callable = Client):
-        self._api_key = api_key
-        self._client_factory = client_factory
+    def __init__(self, client_factory: ClientFactory):
+        self._client = client_factory
         self.character_names: dict[int, str] = {}
-
-    def _client(self):
-        return self._client_factory(api_key=self._api_key)
 
     def load_character_names(self) -> None:
         """캐릭터 코드 -> 한글 이름(없으면 영문 이름). 실패하면 RuntimeError."""

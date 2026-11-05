@@ -56,7 +56,7 @@ def test_fetch_user_stats_without_rank():
 class FakeClient:
     """EternalReturnStats에 넘기는 가짜 bserpy Client (with 문 지원)."""
 
-    def __init__(self, api_key):
+    def __init__(self):
         self.users = FakeUsers()
         self.users.get_uid = self._get_uid
 
@@ -77,7 +77,7 @@ class FakeClient:
 
 def test_team_stats_with_unresolved_slot(monkeypatch):
     monkeypatch.setattr(player_stats, "current_season_id", lambda client: 31)
-    provider = player_stats.EternalReturnStats("key", client_factory=FakeClient)
+    provider = player_stats.EternalReturnStats(FakeClient)
     ocr = [
         {"name": "teammate_1", "best": "PuniPaw", "candidates": ["PuniPaw"], "candidate_scores": {"PuniPaw": 95}},
         {"name": "teammate_2", "best": "Nobody", "candidates": ["Nobody"], "candidate_scores": {"Nobody": 90}},

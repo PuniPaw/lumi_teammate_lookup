@@ -204,15 +204,15 @@ def connect(worker: MatchWorker, controller: OverlayController) -> None:
     worker.team_ready.connect(controller.on_team_ready)
 
 
-def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
-    """설정으로 실제 구현(어댑터)을 만들어 조립합니다."""
+def build(settings: Settings, make_client) -> tuple[MatchWorker, OverlayController]:
+    """설정으로 실제 구현(어댑터)을 만들어 조립합니다. make_client: api.client.client_factory 결과."""
     from lumi.api.player_stats import EternalReturnStats
     from lumi.capture.screen import LiveScreen
     from lumi.game.log import PlayerLog
     from lumi.ocr.paddle import PaddleReader
 
     screen = LiveScreen(settings.game_window_title)
-    stats = EternalReturnStats(settings.api_key)
+    stats = EternalReturnStats(make_client)
     try:
         stats.load_character_names()
     except RuntimeError as e:
@@ -226,16 +226,19 @@ def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
 
 
 def main() -> None:
+    from lumi.api.client import MISSING_API_MESSAGE, client_factory
+
     settings = load_settings()
-    if not settings.api_key:
-        print("❌ ETERNAL_RETURN_API_KEY가 설정되지 않았습니다. .env를 확인하세요.")
+    make_client = client_factory(settings)
+    if make_client is None:
+        print(f"❌ {MISSING_API_MESSAGE}")
         sys.exit(1)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)  # Qt 이벤트 루프 중에도 Ctrl+C로 종료
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # 모달을 닫아도 감시는 계속
 
-    worker, _controller = build(settings)
+    worker, _controller = build(settings, make_client)
     worker.start()
     print("매칭을 기다리는 중... (Ctrl+C 또는 게임 종료 시 함께 종료)")
     sys.exit(app.exec())
