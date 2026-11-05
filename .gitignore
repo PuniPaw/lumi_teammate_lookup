@@ -2,6 +2,5 @@ venv/
 __pycache__/
 *.pyc
 .env
-debug_*.png
 .pytest_cache/
 debug/

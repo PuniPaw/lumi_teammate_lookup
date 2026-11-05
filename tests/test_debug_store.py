@@ -1,14 +1,17 @@
 """debug_store: 디버그 이미지 저장/정리 테스트."""
 
 import os
-import sys
 
+import pytest
 from PIL import Image
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+import debug_store
 
-import debug_store  # noqa: E402
+
+@pytest.fixture(autouse=True)
+def debug_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(debug_store, "ENABLED", True)
+    monkeypatch.setattr(debug_store, "DEBUG_DIR", str(tmp_path))
 
 
 def _touch(path):
@@ -16,7 +19,6 @@ def _touch(path):
 
 
 def test_cleanup_keeps_recent_matches(tmp_path, monkeypatch):
-    monkeypatch.setattr(debug_store, "DEBUG_DIR", str(tmp_path))
     # 예전 형식 파일 + 시각 형식 5판 (판마다 크롭 3장, 일부는 화면 캡처 포함)
     _touch(tmp_path / "match1_end.png")
     _touch(tmp_path / "match1_teammate_1.png")
@@ -43,7 +45,6 @@ def test_cleanup_keeps_recent_matches(tmp_path, monkeypatch):
 
 
 def test_save_crops_and_screen(tmp_path, monkeypatch):
-    monkeypatch.setattr(debug_store, "DEBUG_DIR", str(tmp_path))
     results = [{"name": "teammate_1", "crop_image": Image.new("RGB", (10, 4))}]
     debug_store.save_crops("20261105-101434", results)
     window = {"left": 0, "top": 0, "width": 8, "height": 8, "title": "Eternal Return"}
@@ -56,9 +57,15 @@ def test_save_crops_and_screen(tmp_path, monkeypatch):
 
 
 def test_save_screen_failure_is_harmless(tmp_path, monkeypatch):
-    monkeypatch.setattr(debug_store, "DEBUG_DIR", str(tmp_path))
 
     def boom():
         raise RuntimeError("게임 창 없음")
 
     assert debug_store.save_screen("p", boom) is None
+
+
+def test_disabled_by_default_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(debug_store, "ENABLED", False)
+    debug_store.save_crops("p", [{"name": "teammate_1", "crop_image": Image.new("RGB", (4, 4))}])
+    assert debug_store.save_screen("p", lambda: (Image.new("RGB", (4, 4)), {})) is None
+    assert os.listdir(tmp_path) == []

@@ -1,12 +1,6 @@
 """recent_stats 모듈 단위 테스트 (API 키 없이 가짜 응답으로 확인)."""
 
-import os
-import sys
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-from recent_stats import (  # noqa: E402
+from recent_stats import (
     fetch_recent_games,
     format_recent_stats,
     summarize_recent_games,
