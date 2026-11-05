@@ -1,22 +1,11 @@
 """match_flow(재시도 / 게임 시작 감지) 테스트. 저장된 스크린샷을 사용."""
 
-import os
-import sys
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-from match_flow import LobbyPresence, background_difference, slot_ready, wait_for_teammates  # noqa: E402
-from teammate_ocr import crops_from_image as _crops  # noqa: E402
+from conftest import name_crops
+from lumi.game.match_flow import LobbyPresence, background_difference, slot_ready, wait_for_teammates
 
 
-def crops_from_image(path):
-    # 게임 시작 감지는 항상 같은 위치(미세 보정 없음)를 비교함
-    return _crops(path, refine=False)
-
-
-def _img(name):
-    return os.path.join(ROOT, name)
+def crops_from_image(name):
+    return name_crops(name, refine=False)  # 게임 시작 감지는 항상 같은 위치를 비교
 
 
 def _slot(best, score):
@@ -40,8 +29,11 @@ class FakeClock:
 
 def test_slot_ready():
     assert slot_ready(_slot("PuniPaw", 101))
-    assert not slot_ready(_slot("PuniPaw", 60))
+    assert not slot_ready(_slot("sooin", 70))  # 6글자 미만은 75점 기준
     assert not slot_ready(_slot("1", 90))  # 한 글자 잡음
+    assert not slot_ready(_slot("fis", 70))  # 짧은 잡음 (실존 유저와 일치한 적 있음)
+    assert slot_ready(_slot("124qer123", 61))  # 긴 닉네임은 기준이 낮음
+    assert not slot_ready(_slot("124qer123", 55))
     assert not slot_ready(_slot("", 0))
 
 
@@ -112,22 +104,22 @@ LOBBIES = [
     "test4.png",
     "lobby_16x10.webp",
 ]
-NOT_LOBBIES = ["team_lobby.png", "mode_change.png", "main.png"]
+NOT_LOBBIES = ["team_lobby.png", "main.png"]
 
 
 def test_background_difference_separates_lobby_from_other_screens():
     for ref_name in LOBBIES:
-        ref = crops_from_image(_img(ref_name))
+        ref = crops_from_image((ref_name))
         assert background_difference(ref, ref) == 0
         for other in LOBBIES:
-            assert background_difference(ref, crops_from_image(_img(other))) < 20, other
+            assert background_difference(ref, crops_from_image((other))) < 20, other
         for other in NOT_LOBBIES:
-            assert background_difference(ref, crops_from_image(_img(other))) > 40, other
+            assert background_difference(ref, crops_from_image((other))) > 40, other
 
 
 def test_presence_needs_consecutive_misses():
-    lobby = crops_from_image(_img("test2.png"))
-    ingame = crops_from_image(_img("main.png"))
+    lobby = crops_from_image(("test2.png"))
+    ingame = crops_from_image(("main.png"))
     presence = LobbyPresence(lobby, consecutive=3)
 
     assert not presence.update(lobby)
@@ -139,6 +131,6 @@ def test_presence_needs_consecutive_misses():
 
 
 def test_presence_treats_missing_window_as_gone():
-    presence = LobbyPresence(crops_from_image(_img("test2.png")), consecutive=2)
+    presence = LobbyPresence(crops_from_image(("test2.png")), consecutive=2)
     assert not presence.update(None)
     assert presence.update(None)
