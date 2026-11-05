@@ -41,13 +41,35 @@ from overlay_demo import (
     load_character_names,
 )
 from resolve_teammates import resolve_teammate_names
-from teammate_ocr import capture_crops, get_teammate_ocr_results
+from teammate_ocr import capture_crops, capture_window_snapshot, get_teammate_ocr_results
 
 load_dotenv()
 API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
 
 # 게임 시작 여부를 확인하는 간격(ms)
 PRESENCE_CHECK_INTERVAL_MS = 1000
+
+# 매칭마다 게임 창 캡처(닉네임 영역을 빨간 박스로 표시)를 저장할 폴더.
+# 닉네임 인식이 안 될 때 좌표가 맞는지 확인하는 용도. None이면 저장 안 함.
+DEBUG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
+
+
+def save_debug_snapshot(match_id: int, label: str):
+    """게임 창 전체 캡처를 debug/ 폴더에 저장하고 창 정보를 출력합니다."""
+    if not DEBUG_DIR:
+        return
+    try:
+        img, window = capture_window_snapshot()
+        os.makedirs(DEBUG_DIR, exist_ok=True)
+        path = os.path.join(DEBUG_DIR, f"match{match_id}_{label}.png")
+        img.save(path)
+        print(
+            f"  [디버그] 창 '{window['title']}' 위치=({window['left']},{window['top']}) "
+            f"크기={window['width']}x{window['height']}, 캡처 이미지={img.width}x{img.height}"
+            f" -> {path}"
+        )
+    except Exception as e:
+        print(f"  [디버그] 창 캡처 실패: {e}")
 
 
 def fetch_team_stats(client: Client, ocr_results: list[dict]) -> list[dict]:
@@ -123,11 +145,24 @@ class MatchWorker(QObject):
             return match_id != self._current_match_id()
 
         print("  닉네임 인식 중 (재시도)...")
-        results, ready = wait_for_teammates(get_teammate_ocr_results, should_stop=superseded)
+        save_debug_snapshot(match_id, "start")
+        attempt = 0
+
+        def read():
+            nonlocal attempt
+            attempt += 1
+            results = get_teammate_ocr_results()
+            summary = ", ".join(f"{r['best']!r}({r['confidence']})" for r in results)
+            print(f"  시도 {attempt}: {summary}")
+            return results
+
+        results, ready = wait_for_teammates(read, should_stop=superseded)
         if superseded():
             return
+        save_debug_snapshot(match_id, "end")
         if not results or ready == 0:
             print("  ❌ 닉네임을 인식하지 못했습니다. (모달 표시 안 함)")
+            print(f"     {DEBUG_DIR} 폴더의 캡처 이미지에서 빨간 박스가 닉네임 위치에 있는지 확인하세요.")
             return
         for r in results:
             mark = "✅" if slot_ready(r) else "⚠️"

@@ -63,8 +63,40 @@ def _get_game_window_rect() -> dict:
             "\n게임이 켜져 있는지, GAME_WINDOW_TITLE_KEYWORD가 실제 창 제목과"
             "\n맞는지 확인하세요 (작업 관리자 -> 세부 정보에서 확인 가능)."
         )
-    win = windows[0]
-    return {"left": win.left, "top": win.top, "width": win.width, "height": win.height}
+    # 같은 단어가 들어간 다른 창(브라우저 탭, 폴더 등)이 있을 수 있어서,
+    # 최소화되지 않은 창 중 가장 큰 창을 게임 창으로 봅니다.
+    visible = [w for w in windows if not getattr(w, "isMinimized", False) and w.width > 0]
+    win = max(visible or windows, key=lambda w: w.width * w.height)
+    return {
+        "left": win.left,
+        "top": win.top,
+        "width": win.width,
+        "height": win.height,
+        "title": win.title,
+    }
+
+
+def capture_window_snapshot() -> tuple[Image.Image, dict]:
+    """디버그용: 게임 창 전체를 캡처하고, 닉네임 크롭 영역을 빨간 박스로
+    표시한 이미지와 창 정보를 반환합니다. (좌표가 맞는지 눈으로 확인용)"""
+    from PIL import ImageDraw
+
+    window = _get_game_window_rect()
+    with mss.mss() as sct:
+        img = _capture_region(sct, window)
+    draw = ImageDraw.Draw(img)
+    for region in _resolve_crop_regions_for_image(img.width, img.height):
+        draw.rectangle(
+            (
+                region["left"] - 2,
+                region["top"] - 2,
+                region["left"] + region["width"] + 2,
+                region["top"] + region["height"] + 2,
+            ),
+            outline=(255, 0, 0),
+            width=2,
+        )
+    return img, window
 
 
 def _resolve_crop_regions() -> list[dict]:

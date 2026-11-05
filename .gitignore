@@ -4,3 +4,4 @@ __pycache__/
 .env
 debug_*.png
 .pytest_cache/
+debug/
