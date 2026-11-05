@@ -262,6 +262,10 @@ OCR_LANGS = ["eng", "kor", "jpn", "chi_sim", "chi_tra"]
 # (예: 'ya발견'의 한글은 3배에서, 영문은 6배에서 잘 읽힘) 여러 개를 씁니다.
 OCR_PASSES = [(3, "soft"), (6, "soft"), (6, "binary")]
 
+# 위 배율의 기준이 되는 닉네임 칸 높이(px). 1920x1080에서 칸 높이 14px +
+# 위치 미세 보정 여유 위아래 1px. 칸이 이보다 크면(고해상도) 배율을 줄입니다.
+OCR_REFERENCE_CROP_HEIGHT = 16
+
 # 1단계(빠른 OCR): 이 패스/언어팩만 먼저 돌려서 점수가 FAST_ACCEPT_SCORE
 # 이상이면 바로 확정합니다. (Windows는 Tesseract 실행 1회 비용이 커서,
 # 전체 15회를 매번 돌리면 한 칸에 수 초가 걸림)
@@ -352,7 +356,7 @@ def _trim_edge_columns(img: Image.Image) -> Image.Image:
     return img.crop((left, 0, right, h))
 
 
-def _preprocess(img: Image.Image, scale: int = 6, mode: str = "soft") -> Image.Image:
+def _preprocess(img: Image.Image, scale: float = 6, mode: str = "soft") -> Image.Image:
     """OCR 정확도를 올리기 위한 전처리.
 
     닉네임이 '어두운 반투명 배경 + 흰 글씨'라서 반전이 필요합니다.
@@ -362,7 +366,9 @@ def _preprocess(img: Image.Image, scale: int = 6, mode: str = "soft") -> Image.I
     못 잡는 경우가 있어, 상하좌우에 흰 여백을 추가합니다.
     """
     gray = img.convert("L")
-    scaled = gray.resize((gray.width * scale, gray.height * scale), Image.LANCZOS)
+    scaled = gray.resize(
+        (max(1, round(gray.width * scale)), max(1, round(gray.height * scale))), Image.LANCZOS
+    )
     inverted = ImageOps.invert(scaled)
     contrasted = ImageOps.autocontrast(inverted, cutoff=1)
     if mode == "binary":
@@ -554,12 +560,19 @@ def _run_ocr(crop: Image.Image) -> dict:
     if _text_pixel_ratio(crop) < MIN_TEXT_PIXEL_RATIO:
         return _empty_result()  # 빈 칸 (아직 닉네임이 안 그려졌거나 다른 화면)
 
-    images = {p: _preprocess(crop, *p) for p in OCR_PASSES}
+    # 해상도가 높으면 칸 높이도 커지므로(2880x1800에서는 약 1.5배), 확대 배율을
+    # 칸 높이에 반비례하게 조정해서 항상 같은 글자 크기로 OCR 합니다.
+    # (OCR_PASSES의 배율은 기준 해상도의 칸 높이 OCR_REFERENCE_CROP_HEIGHT 기준)
+    size_factor = OCR_REFERENCE_CROP_HEIGHT / max(1, crop.height)
+    effective = {p: p[0] * size_factor for p in OCR_PASSES}
+    images = {p: _preprocess(crop, effective[p], p[1]) for p in OCR_PASSES}
 
     def run(jobs_spec):
         words_by_pass: dict = {}
         with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = [(p, pool.submit(_ocr_words, images[p], lang, p[0])) for p, lang in jobs_spec]
+            futures = [
+                (p, pool.submit(_ocr_words, images[p], lang, effective[p])) for p, lang in jobs_spec
+            ]
             for p, fut in futures:
                 words_by_pass.setdefault(p, []).extend(fut.result())
         return words_by_pass
