@@ -24,6 +24,32 @@ API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
 # 팀원 한 명당 API로 확인해 볼 OCR 후보 최대 개수
 MAX_CANDIDATES = 8
 
+# 점수가 낮은 후보(글자 일부만 읽은 것 등)를 API에 조회하면, 우연히
+# 실존하는 '다른 유저'와 일치해서 엉뚱한 전적이 뜰 수 있습니다.
+# (예: '静戒丨BS'의 일부만 읽은 '1BS'가 실제 유저로 확정된 적이 있음)
+# 그래서 아래 조건을 모두 만족하는 후보만 조회합니다.
+MIN_CANDIDATE_SCORE = 60  # OCR 점수(0~100+) 최소값
+CANDIDATE_SCORE_MARGIN = 25  # 1등 후보 점수와의 차이 허용 범위
+MIN_NICKNAME_LENGTH = 2  # 한 글자 후보는 대부분 잡음
+
+
+def _candidates_to_try(result: dict) -> list[str]:
+    """OCR 결과에서 API로 확인해 볼 후보만 점수순으로 골라냅니다."""
+    scores = result.get("candidate_scores")
+    if not scores:
+        # 점수 정보가 없는 예전 형식의 결과
+        candidates = result.get("candidates") or list(result["variants"].values())
+        return list(dict.fromkeys(c for c in candidates if c))[:MAX_CANDIDATES]
+
+    best_score = max(scores.values())
+    threshold = max(MIN_CANDIDATE_SCORE, best_score - CANDIDATE_SCORE_MARGIN)
+    picked = [
+        text
+        for text in result["candidates"]
+        if scores.get(text, 0) >= threshold and len(text) >= MIN_NICKNAME_LENGTH
+    ]
+    return picked[:MAX_CANDIDATES]
+
 
 def resolve_teammate_names(client: Client, ocr_results: list[dict]) -> list[dict]:
     """OCR 결과 리스트를 받아서, 각 팀원마다 실제로 존재하는 닉네임과
@@ -42,11 +68,8 @@ def resolve_teammate_names(client: Client, ocr_results: list[dict]) -> list[dict
     for result in ocr_results:
         region_name = result["name"]
 
-        # OCR이 점수 높은 순으로 정렬해 둔 후보를 앞에서부터 시도
-        # (예전 형식의 결과면 variants 값을 사용). API 호출이 너무 많아지지
-        # 않도록 상위 MAX_CANDIDATES개만 시도합니다.
-        candidates = result.get("candidates") or list(result["variants"].values())
-        candidates = list(dict.fromkeys(c for c in candidates if c))[:MAX_CANDIDATES]
+        # OCR 점수가 충분히 높은 후보만, 점수 높은 순으로 시도
+        candidates = _candidates_to_try(result)
 
         found_nickname = None
         found_user_id = None

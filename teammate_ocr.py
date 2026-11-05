@@ -417,7 +417,7 @@ def _run_ocr(crop: Image.Image) -> dict:
     ranked = sorted(scores, key=lambda t: scores[t], reverse=True)
     if not ranked:
         return {"best": "", "best_source": "", "confidence": 0.0,
-                "candidates": [], "variants": {}}
+                "candidates": [], "candidate_scores": {}, "variants": {}}
 
     best = ranked[0]
     return {
@@ -425,6 +425,7 @@ def _run_ocr(crop: Image.Image) -> dict:
         "best_source": sources[best],
         "confidence": round(max(0.0, min(100.0, scores[best])), 1),
         "candidates": ranked,
+        "candidate_scores": {t: round(scores[t], 1) for t in ranked},
         "variants": {sources[t]: t for t in ranked},
     }
 
