@@ -3,6 +3,7 @@ import os
 from typing import Optional, List, Dict
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -480,10 +481,13 @@ class OverlayWindow(QWidget):
         super().__init__()
 
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool  # 작업 표시줄에 안 뜨는 보조 창
         )
+        # 뜰 때 게임에서 포커스를 뺏지 않음 (닉네임 수정하려고 클릭하면 그때 활성화)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setStyleSheet("background-color: #1e1e1e;")
-        self.move(1500, 50)
         self.setFixedWidth(340)
 
         # 메인 레이아웃
@@ -523,6 +527,27 @@ class OverlayWindow(QWidget):
         )
         close_btn.clicked.connect(self.close)
         main_layout.addWidget(close_btn)
+
+        self.place_on_screen()
+
+    def place_on_screen(self, margin: int = 20):
+        """모달을 '화면 오른쪽 위'에 놓습니다.
+
+        예전엔 move(1500, 50)으로 고정했는데, Qt 좌표는 Windows 배율이 적용된
+        논리 좌표라서 2880x1800 + 배율 200% 화면(논리 1440x900)에서는 화면
+        밖으로 나가 보이지 않았음. 그래서 실제 화면 크기 기준으로 계산합니다.
+        (마우스가 있는 모니터 = 보통 게임이 떠 있는 모니터)
+        """
+        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        self.adjustSize()
+        width = min(self.width(), geo.width())
+        height = min(self.height(), geo.height())
+        x = max(geo.left(), geo.right() - width - margin + 1)
+        y = geo.top() + min(margin, max(0, geo.height() - height))
+        self.move(x, y)
 
 
 def parse_team_stats_from_argv():

@@ -107,3 +107,19 @@ def test_match_shows_modal_then_closes_when_game_starts(tmp_path, monkeypatch):
     # 게임 시작 -> 닉네임 칸이 사라진 화면
     screen["name"] = "main.png"
     assert _wait_until(app, lambda: controller.window is None, timeout=5), "모달이 닫히지 않음"
+
+
+def test_overlay_is_placed_inside_screen():
+    """모달이 화면 안(오른쪽 위)에 놓이는지. 예전엔 move(1500, 50) 고정이라
+    배율 200% 화면(논리 1440x900)에서 화면 밖으로 나가 안 보였음."""
+    app = QApplication.instance() or QApplication([])
+    stats = [live_overlay._failed_stats(n) for n in ("PuniPaw", "12345a", "얼음마녀")]
+    window = live_overlay.OverlayWindow(stats)
+    window.show()
+    app.processEvents()
+
+    screen = app.primaryScreen().availableGeometry()
+    geo = window.frameGeometry()
+    assert screen.contains(geo.topLeft()) and screen.contains(geo.topRight())
+    assert geo.right() >= screen.right() - 100  # 오른쪽에 붙어 있음
+    window.close()
