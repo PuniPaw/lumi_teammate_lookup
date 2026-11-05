@@ -1,6 +1,6 @@
 """recent_stats 모듈 단위 테스트 (API 키 없이 가짜 응답으로 확인)."""
 
-from recent_stats import (
+from lumi.api.recent_stats import (
     fetch_recent_games,
     format_recent_stats,
     summarize_recent_games,

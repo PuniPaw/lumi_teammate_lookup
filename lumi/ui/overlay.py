@@ -1,5 +1,7 @@
 """팀원 전적 모달 창 (PySide6)."""
 
+from typing import Callable, Optional
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
@@ -12,8 +14,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from player_stats import fetch_stats_by_nickname
-from recent_stats import format_recent_stats
+from lumi.api.recent_stats import format_recent_stats
+
+# 닉네임 -> 전적 dict (못 찾으면 None). 모달에서 닉네임을 고쳐 Enter를 누를 때 사용
+Refetch = Callable[[str], Optional[dict]]
 
 WINDOW_WIDTH = 340
 SCREEN_MARGIN = 20
@@ -22,8 +26,9 @@ SCREEN_MARGIN = 20
 class TeammateRow(QFrame):
     """팀원 한 명의 카드. 닉네임을 고쳐 Enter를 누르면 재조회합니다."""
 
-    def __init__(self, stats: dict):
+    def __init__(self, stats: dict, refetch: Refetch):
         super().__init__()
+        self._refetch = refetch
         self.setStyleSheet("background-color: #2a2a2a; border-radius: 6px;")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 6)
@@ -79,7 +84,7 @@ class TeammateRow(QFrame):
         self.status_line.hide()
         self.detail_line.setText("조회 중...")
 
-        stats = fetch_stats_by_nickname(nickname)
+        stats = self._refetch(nickname)
         if stats is None:
             self.detail_line.setText("이전 정보 유지됨")
             self.status_line.setText(f"'{nickname}' 유저를 찾을 수 없습니다.")
@@ -113,7 +118,7 @@ class DraggableHeader(QLabel):
 class OverlayWindow(QWidget):
     """팀원 카드들을 보여주는 항상-위 창."""
 
-    def __init__(self, team_stats: list[dict]):
+    def __init__(self, team_stats: list[dict], refetch: Refetch):
         super().__init__()
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -135,7 +140,7 @@ class OverlayWindow(QWidget):
         cards_layout = QVBoxLayout(cards)
         cards_layout.setSpacing(6)
         for stats in team_stats:
-            cards_layout.addWidget(TeammateRow(stats))
+            cards_layout.addWidget(TeammateRow(stats, refetch))
         cards_layout.addStretch()
 
         scroll = QScrollArea()

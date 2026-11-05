@@ -1,71 +1,70 @@
 """
 매칭이 잡히면 팀원 전적 모달을 띄우고, 게임이 시작되면 닫습니다.
 
-  1) Player.log에서 매칭 완료 감지
-  2) 닉네임이 다 그려질 때까지 캡처 + OCR 재시도 (match_flow.wait_for_teammates)
-  3) Open API로 닉네임 확정 + 전적 조회 -> 모달 표시
-  4) 1초마다 닉네임 칸을 확인해 사라진 상태가 이어지면 모달 닫기 (match_flow.LobbyPresence)
+  1) 매칭 완료 신호 (MatchSignals)
+  2) 닉네임이 다 그려질 때까지 캡처(ScreenSource) + OCR(NicknameReader) 재시도
+  3) 닉네임 확정 + 전적 조회 (StatsProvider) -> 모달 표시
+  4) 1초마다 닉네임 칸을 확인해 사라진 상태가 이어지면 모달 닫기
   새 매칭이 잡히면(닷지 후 재매칭 등) 기존 모달을 닫고 다시 진행합니다.
 
-실행: python live_overlay.py  (보통은 game_watcher.py가 게임 실행 시 자동 실행, Windows 전용)
+외부 연결은 ports.py의 인터페이스로만 다루고, 실제 구현은 build()에서 설정으로 조립합니다.
+실행: python -m lumi.app  (보통은 python -m lumi가 게임 실행 시 자동 실행)
 """
 
 import queue
 import signal
 import sys
 import threading
-import time
 import traceback
 from typing import Optional
 
-from bserpy import Client
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
-import debug_store
-import log_watcher
-from match_flow import LobbyPresence, slot_ready, wait_for_teammates
-from overlay import OverlayWindow
-from player_stats import API_KEY, fetch_team_stats, load_character_names
-from screen_capture import capture_crops, capture_window_snapshot, is_game_window_active
-from teammate_ocr import get_teammate_ocr_results
+from lumi.config import Settings, load_settings
+from lumi.debug.store import DebugStore
+from lumi.game.match_flow import LobbyPresence, slot_ready, wait_for_teammates
+from lumi.ports import MatchSignals, NicknameReader, ScreenSource, StatsProvider
+from lumi.ui.overlay import OverlayWindow
 
-# 매칭 완료 로그는 한 번에 여러 줄 찍히므로 이 시간(초) 안의 신호는 같은 매칭으로 봄
-MATCH_DEBOUNCE_SECONDS = 5.0
 # 게임 시작 여부 확인 간격(ms)
 PRESENCE_CHECK_INTERVAL_MS = 1000
 
 
 class MatchWorker(QObject):
-    """백그라운드 스레드에서 로그 감시 / OCR / API 조회."""
+    """백그라운드 스레드에서 매칭 신호 대기 / OCR / 전적 조회."""
 
     match_detected = Signal()  # 새 매칭 (기존 모달 닫기용)
     team_ready = Signal(list, list)  # (팀원 전적 목록, 게임 시작 감지용 기준 크롭)
 
-    def __init__(self):
+    def __init__(
+        self,
+        signals: MatchSignals,
+        screen: ScreenSource,
+        reader: NicknameReader,
+        stats: StatsProvider,
+        debug: DebugStore,
+    ):
         super().__init__()
+        self.signals = signals
+        self.screen = screen
+        self.reader = reader
+        self.stats = stats
+        self.debug = debug
         self._events: "queue.Queue[int]" = queue.Queue()
         self._match_id = 0
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        threading.Thread(target=self._watch_log, daemon=True).start()
+        threading.Thread(target=self._watch_matches, daemon=True).start()
         threading.Thread(target=self._process_matches, daemon=True).start()
 
-    def _current_match_id(self) -> int:
+    def current_match_id(self) -> int:
         with self._lock:
             return self._match_id
 
-    def _watch_log(self) -> None:
-        print(f"로그 감시 시작: {log_watcher.LOG_PATH}")
-        last_match_at = float("-inf")
-        for line in log_watcher.follow(log_watcher.LOG_PATH):
-            if not log_watcher.is_match_complete(line):
-                continue
-            now = time.monotonic()
-            if now - last_match_at < MATCH_DEBOUNCE_SECONDS:
-                continue
-            last_match_at = now
+    def _watch_matches(self) -> None:
+        for _ in self.signals.matches():
             with self._lock:
                 self._match_id += 1
                 match_id = self._match_id
@@ -76,7 +75,7 @@ class MatchWorker(QObject):
     def _process_matches(self) -> None:
         while True:
             match_id = self._events.get()
-            if match_id != self._current_match_id():
+            if match_id != self.current_match_id():
                 continue  # 처리 전에 더 새로운 매칭이 들어옴
             try:
                 self._handle_match(match_id)
@@ -85,7 +84,7 @@ class MatchWorker(QObject):
 
     def _handle_match(self, match_id: int) -> None:
         def superseded() -> bool:
-            return match_id != self._current_match_id()
+            return match_id != self.current_match_id()
 
         print("  닉네임 인식 중...")
         warned_hidden = False
@@ -94,11 +93,11 @@ class MatchWorker(QObject):
         def read() -> list[dict]:
             nonlocal attempt, warned_hidden
             attempt += 1
-            if not warned_hidden and not is_game_window_active():
+            if not warned_hidden and not self.screen.is_active():
                 warned_hidden = True
                 print("  ⚠️ 게임 창이 다른 창에 가려져 있습니다. 게임 창을 맨 앞에 두세요.")
-            results = get_teammate_ocr_results()
-            if debug_store.ENABLED:
+            results = self.reader.read(self.screen.name_crops())
+            if self.debug.enabled:
                 print(f"  시도 {attempt}: " + ", ".join(f"{r['best']!r}({r['confidence']})" for r in results))
             return results
 
@@ -106,11 +105,11 @@ class MatchWorker(QObject):
         if superseded():
             return
 
-        prefix = debug_store.new_match_prefix()
-        debug_store.save_crops(prefix, results or [])
+        prefix = self.debug.new_match_prefix()
+        self.debug.save_crops(prefix, results or [])
         if not results or ready < len(results):
-            debug_store.save_screen(prefix, capture_window_snapshot)
-        debug_store.cleanup()
+            self.debug.save_screen(prefix, self.screen.snapshot)
+        self.debug.cleanup()
 
         if not results or ready == 0:
             print("  ❌ 닉네임을 인식하지 못했습니다.")
@@ -118,15 +117,14 @@ class MatchWorker(QObject):
         for r in results:
             print(f"  {'✅' if slot_ready(r) else '⚠️'} {r['name']}: {r['best']!r} (점수 {r['confidence']})")
 
-        with Client(api_key=API_KEY) as client:
-            team_stats = fetch_team_stats(client, results)
+        team_stats = self.stats.team_stats(results)
         if ready == len(results) and any(not s.get("user_id") for s in team_stats):
-            debug_store.save_screen(prefix, capture_window_snapshot)  # 읽었지만 확정 못 한 팀원
+            self.debug.save_screen(prefix, self.screen.snapshot)  # 읽었지만 확정 못 한 팀원
         if superseded() or not team_stats:
             return
 
         try:
-            reference = capture_crops(refine=False)  # 게임 시작 감지는 항상 같은 위치를 비교
+            reference = self.screen.name_crops(refine=False)  # 게임 시작 감지는 항상 같은 위치를 비교
         except Exception:
             reference = [r["crop_image"] for r in results]
         self.team_ready.emit(team_stats, reference)
@@ -135,8 +133,11 @@ class MatchWorker(QObject):
 class OverlayController(QObject):
     """메인(Qt) 스레드에서 모달 표시/닫기."""
 
-    def __init__(self):
+    def __init__(self, screen: ScreenSource, stats: StatsProvider, debug: DebugStore):
         super().__init__()
+        self.screen = screen
+        self.stats = stats
+        self.debug = debug
         self.window: Optional[OverlayWindow] = None
         self.presence: Optional[LobbyPresence] = None
         self.timer = QTimer(self)
@@ -158,10 +159,10 @@ class OverlayController(QObject):
 
     def on_team_ready(self, team_stats: list, reference: list) -> None:
         self.close_overlay()
-        self.window = OverlayWindow(team_stats)
+        self.window = OverlayWindow(team_stats, refetch=self.stats.user_stats)
         self.window.show()
         self.window.raise_()
-        if debug_store.ENABLED:
+        if self.debug.enabled:
             geo = self.window.frameGeometry()
             print(f"  모달 위치=({geo.x()},{geo.y()}) 크기={geo.width()}x{geo.height()} (Qt 논리 좌표)")
         self.presence = LobbyPresence(reference)
@@ -173,15 +174,42 @@ class OverlayController(QObject):
             self.close_overlay()
             return
         try:
-            current = capture_crops(refine=False)
+            current = self.screen.name_crops(refine=False)
         except Exception:
             current = None  # 게임 창을 못 찾으면 '사라짐'으로 취급
         if self.presence.update(current):
             self.close_overlay("게임 시작")
 
 
+def connect(worker: MatchWorker, controller: OverlayController) -> None:
+    worker.match_detected.connect(controller.on_match_detected)
+    worker.team_ready.connect(controller.on_team_ready)
+
+
+def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
+    """설정으로 실제 구현(어댑터)을 만들어 조립합니다."""
+    from lumi.api.player_stats import EternalReturnStats
+    from lumi.capture.screen import LiveScreen
+    from lumi.game.log import PlayerLog
+    from lumi.ocr.reader import TesseractReader
+
+    screen = LiveScreen(settings.game_window_title)
+    stats = EternalReturnStats(settings.api_key)
+    try:
+        stats.load_character_names()
+    except RuntimeError as e:
+        print(f"⚠️ {e} (캐릭터 이름 대신 코드로 표시됩니다)")
+    debug = DebugStore(settings.debug, settings.debug_dir)
+
+    worker = MatchWorker(PlayerLog(settings.log_path), screen, TesseractReader(settings.tesseract_cmd), stats, debug)
+    controller = OverlayController(screen, stats, debug)
+    connect(worker, controller)
+    return worker, controller
+
+
 def main() -> None:
-    if not API_KEY:
+    settings = load_settings()
+    if not settings.api_key:
         print("❌ ETERNAL_RETURN_API_KEY가 설정되지 않았습니다. .env를 확인하세요.")
         sys.exit(1)
 
@@ -189,17 +217,8 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # 모달을 닫아도 감시는 계속
 
-    try:
-        load_character_names()
-    except RuntimeError as e:
-        print(f"⚠️ {e} (캐릭터 이름 대신 코드로 표시됩니다)")
-
-    controller = OverlayController()
-    worker = MatchWorker()
-    worker.match_detected.connect(controller.on_match_detected)
-    worker.team_ready.connect(controller.on_team_ready)
+    worker, _controller = build(settings)
     worker.start()
-
     print("매칭을 기다리는 중... (Ctrl+C 또는 게임 종료 시 함께 종료)")
     sys.exit(app.exec())
 

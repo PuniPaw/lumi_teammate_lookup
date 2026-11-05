@@ -1,7 +1,7 @@
 """resolve_teammates.candidates_to_try 단위 테스트 (API 호출 없음)."""
 
-from resolve_teammates import candidates_to_try, lookalike_candidates
-from teammate_ocr import lookalike_variants
+from lumi.api.resolve import candidates_to_try, lookalike_candidates
+from lumi.ocr.candidates import lookalike_variants
 
 
 def _result(scores: dict) -> dict:

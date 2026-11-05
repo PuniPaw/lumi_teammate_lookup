@@ -23,32 +23,49 @@
 ## 실행
 
 ```
-python game_watcher.py
+python -m lumi
 ```
-게임이 켜지면 `live_overlay.py`가 자동으로 실행됩니다. 게임 창을 맨 앞에 두세요 (화면을 보이는 그대로 캡처합니다).
+게임이 켜지면 앱(`lumi.app`)이 자동으로 실행됩니다. 게임 창을 맨 앞에 두세요 (화면을 보이는 그대로 캡처합니다).
+
+## 설정
+
+`.env` 또는 환경 변수로 바꿀 수 있습니다 (`lumi/config.py`).
+
+| 환경 변수 | 설명 | 기본값 |
+|---|---|---|
+| `ETERNAL_RETURN_API_KEY` | Open API 키 (필수) | |
+| `LUMI_DEBUG` | 디버그 출력/이미지 저장 (`1`로 켬) | 꺼짐 |
+| `LUMI_GAME_PROCESS` | 게임 프로세스 이름 | `EternalReturn.exe` |
+| `LUMI_GAME_WINDOW_TITLE` | 게임 창 제목 (부분 일치) | `Eternal Return` |
+| `LUMI_LOG_PATH` | 게임 로그 경로 | `%USERPROFILE%\AppData\LocalLow\NimbleNeuron\Eternal Return\Player.log` |
+| `LUMI_TESSERACT_CMD` | tesseract 실행 파일 | Windows 기본 설치 경로 또는 PATH |
 
 ## 구조
 
-| 파일 | 역할 |
-|---|---|
-| `game_watcher.py` | 게임 프로세스 감시, `live_overlay.py` 실행/종료 |
-| `live_overlay.py` | 매칭 감지 → OCR → 전적 조회 → 모달 표시/닫기 |
-| `log_watcher.py` | `Player.log`에서 매칭 완료 감지 |
-| `screen_capture.py` | 게임 창 찾기, 해상도별 닉네임 칸 위치 계산, 캡처 |
-| `teammate_ocr.py` | 닉네임 칸 OCR → 점수순 후보 |
-| `resolve_teammates.py` | 후보를 Open API로 조회해 닉네임 확정 |
-| `player_stats.py` | 티어/시즌 통계/최근 게임 조회 |
-| `recent_stats.py` | 최근 N게임 평균 딜량/TK |
-| `match_flow.py` | OCR 재시도, 게임 시작(닉네임 칸 사라짐) 판단 |
-| `overlay.py` | 모달 UI (PySide6) |
-| `debug_store.py`, `debug_crops.py` | 디버그 이미지 저장/분석 |
+```
+lumi/
+  __main__.py       python -m lumi: 게임 프로세스 감시 -> 앱 실행
+  app.py            매칭 -> OCR -> 전적 조회 -> 모달 흐름, 실제 구현 조립(build)
+  config.py         설정 (Settings)
+  ports.py          외부 연결 인터페이스 (ScreenSource, NicknameReader, StatsProvider, MatchSignals)
+  game/             process.py 게임 감시, log.py 매칭 감지(PlayerLog), match_flow.py 재시도/게임 시작 판단
+  capture/          screen.py 닉네임 칸 위치 계산과 캡처 (LiveScreen, ImageScreen)
+  ocr/              chars.py 문자 종류, engine.py Tesseract, candidates.py 후보/점수, reader.py (TesseractReader)
+  api/              resolve.py 닉네임 확정, player_stats.py 전적 (EternalReturnStats), recent_stats.py 최근 20게임
+  ui/               overlay.py 모달
+  debug/            store.py 디버그 이미지, crops.py / check.py 확인 도구
+tests/              fixtures/ 실제 게임 화면
+docs/               개발 노트
+```
+
+`app.py`는 `ports.py`의 인터페이스에만 의존하고, 실제 구현(게임 화면, Tesseract, Open API, 로그 파일)은 `build()`에서 설정으로 만들어 넘깁니다. 테스트에서는 가짜 구현을 넘깁니다.
 
 ## 문제 확인
 
-- 스크린샷으로 OCR + API 확정까지 확인: `python resolve_teammates.py <스크린샷>`
-- 닉네임 칸을 원본 해상도로 잘라 보기: `python debug_crops.py <스크린샷>`
-- 매칭 관련 로그 확인: `python log_watcher.py`
-- 디버그 이미지 저장 켜기: `.env`에 `LUMI_DEBUG=1` → `debug/`에 매 판 닉네임 칸, 실패한 판은 게임 화면 저장 (최근 20판 유지)
+- 스크린샷으로 OCR + API 확정까지 확인: `python -m lumi.debug.check <스크린샷>` (생략하면 지금 게임 화면)
+- 닉네임 칸을 원본 해상도로 잘라 보기: `python -m lumi.debug.crops <스크린샷>`
+- 매칭 관련 로그 확인: `python -m lumi.game.log`
+- 디버그 이미지 저장: `.env`에 `LUMI_DEBUG=1` → `debug/`에 매 판 닉네임 칸, 실패한 판은 게임 화면 저장 (최근 20판 유지)
 
 ## 테스트
 

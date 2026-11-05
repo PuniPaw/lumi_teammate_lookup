@@ -1,16 +1,11 @@
 """match_flow(재시도 / 게임 시작 감지) 테스트. 저장된 스크린샷을 사용."""
 
-from conftest import fixture
-from match_flow import LobbyPresence, background_difference, slot_ready, wait_for_teammates
-from screen_capture import crops_from_image as _crops
+from conftest import name_crops
+from lumi.game.match_flow import LobbyPresence, background_difference, slot_ready, wait_for_teammates
 
 
-def crops_from_image(path):
-    return _crops(path, refine=False)  # 게임 시작 감지는 항상 같은 위치를 비교
-
-
-def _img(name):
-    return fixture(name)
+def crops_from_image(name):
+    return name_crops(name, refine=False)  # 게임 시작 감지는 항상 같은 위치를 비교
 
 
 def _slot(best, score):
@@ -111,17 +106,17 @@ NOT_LOBBIES = ["team_lobby.png", "main.png"]
 
 def test_background_difference_separates_lobby_from_other_screens():
     for ref_name in LOBBIES:
-        ref = crops_from_image(_img(ref_name))
+        ref = crops_from_image((ref_name))
         assert background_difference(ref, ref) == 0
         for other in LOBBIES:
-            assert background_difference(ref, crops_from_image(_img(other))) < 20, other
+            assert background_difference(ref, crops_from_image((other))) < 20, other
         for other in NOT_LOBBIES:
-            assert background_difference(ref, crops_from_image(_img(other))) > 40, other
+            assert background_difference(ref, crops_from_image((other))) > 40, other
 
 
 def test_presence_needs_consecutive_misses():
-    lobby = crops_from_image(_img("test2.png"))
-    ingame = crops_from_image(_img("main.png"))
+    lobby = crops_from_image(("test2.png"))
+    ingame = crops_from_image(("main.png"))
     presence = LobbyPresence(lobby, consecutive=3)
 
     assert not presence.update(lobby)
@@ -133,6 +128,6 @@ def test_presence_needs_consecutive_misses():
 
 
 def test_presence_treats_missing_window_as_gone():
-    presence = LobbyPresence(crops_from_image(_img("test2.png")), consecutive=2)
+    presence = LobbyPresence(crops_from_image(("test2.png")), consecutive=2)
     assert not presence.update(None)
     assert presence.update(None)

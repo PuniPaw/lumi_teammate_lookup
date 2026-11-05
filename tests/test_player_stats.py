@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-import player_stats
+from lumi.api import player_stats
 
 
 def test_tier_name():
@@ -38,9 +38,8 @@ class FakeUsers:
         ]
 
 
-def test_fetch_user_stats(monkeypatch):
-    monkeypatch.setitem(player_stats.CHARACTER_NAMES, 1, "재키")
-    stats = player_stats.fetch_user_stats(SimpleNamespace(users=FakeUsers()), "PuniPaw", 31)
+def test_fetch_user_stats():
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=FakeUsers()), "PuniPaw", 31, {1: "재키"})
     assert stats["user_id"] == "uid-1"
     assert (stats["tier"], stats["mmr"]) == ("다이아몬드 II", 5780)
     assert (stats["games"], round(stats["top1"]), stats["average_rank"]) == (120, 14, 4.3)
@@ -49,6 +48,43 @@ def test_fetch_user_stats(monkeypatch):
 
 
 def test_fetch_user_stats_without_rank():
-    stats = player_stats.fetch_user_stats(SimpleNamespace(users=FakeUsers(rank_error=True)), "PuniPaw", 31)
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=FakeUsers(rank_error=True)), "PuniPaw", 31, {})
     assert (stats["tier"], stats["mmr"]) == ("언랭크", 0)
     assert stats["user_id"] == "uid-1"
+
+
+class FakeClient:
+    """EternalReturnStats에 넘기는 가짜 bserpy Client (with 문 지원)."""
+
+    def __init__(self, api_key):
+        self.users = FakeUsers()
+        self.users.get_uid = self._get_uid
+
+    @staticmethod
+    def _get_uid(nickname):
+        if nickname != "PuniPaw":
+            from bserpy import NotFoundError
+
+            raise NotFoundError("not found")
+        return SimpleNamespace(user_id="uid-1")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_team_stats_with_unresolved_slot(monkeypatch):
+    monkeypatch.setattr(player_stats, "current_season_id", lambda client: 31)
+    provider = player_stats.EternalReturnStats("key", client_factory=FakeClient)
+    ocr = [
+        {"name": "teammate_1", "best": "PuniPaw", "candidates": ["PuniPaw"], "candidate_scores": {"PuniPaw": 95}},
+        {"name": "teammate_2", "best": "Nobody", "candidates": ["Nobody"], "candidate_scores": {"Nobody": 90}},
+        {"name": "teammate_3", "best": "", "candidates": [], "candidate_scores": {}},
+    ]
+    team = provider.team_stats(ocr)
+    assert [s["nickname"] for s in team] == ["PuniPaw", "Nobody"]  # 빈 칸은 카드 없음
+    assert team[0]["user_id"] == "uid-1"
+    assert (team[1]["tier"], team[1]["user_id"]) == ("조회 실패", None)  # 못 찾으면 수정 가능한 카드
+    assert provider.user_stats("Nobody") is None

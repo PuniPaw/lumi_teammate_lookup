@@ -9,9 +9,11 @@
 
 from PIL import Image
 
-from conftest import fixture
-from resolve_teammates import candidates_to_try, lookalike_candidates
-from teammate_ocr import get_teammate_ocr_results_from_image, ocr_crops
+from conftest import fixture, name_crops
+from lumi.api.resolve import candidates_to_try, lookalike_candidates
+from lumi.ocr.reader import TesseractReader
+
+reader = TesseractReader()
 
 EXPECTED = {
     "matching_lobby_screen.png": ["PuniPaw", "sooin", "ya발견"],
@@ -39,7 +41,7 @@ def api_tried(result: dict) -> list[str]:
 
 def _results():
     for image, names in EXPECTED.items():
-        for idx, (expected, result) in enumerate(zip(names, get_teammate_ocr_results_from_image(fixture(image)))):
+        for idx, (expected, result) in enumerate(zip(names, reader.read(name_crops(image)))):
             yield image, idx, expected, result
 
 
@@ -55,7 +57,7 @@ def test_nicknames():
 def test_native_resolution_crop():
     """실게임 2880x1800 원본 크롭"""
     crop = Image.open(fixture("crop_2880x1800_fujita.png")).convert("RGB")
-    assert "藤田皮卡丘" in api_tried(ocr_crops([crop])[0])
+    assert "藤田皮卡丘" in api_tried(reader.read([crop])[0])
 
 
 if __name__ == "__main__":

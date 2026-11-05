@@ -1,5 +1,8 @@
 """
-게임 화면에서 팀원 닉네임 칸을 찾아 잘라냅니다 (실시간 캡처 / 저장된 스크린샷).
+게임 화면에서 팀원 닉네임 칸을 찾아 잘라냅니다.
+
+- LiveScreen: 실제 게임 화면 (Windows)
+- ImageScreen: 저장된 스크린샷 (테스트/디버그)
 
 닉네임 칸 위치는 기준 해상도 1920x1080에서 잰 좌표를 ui_regions()로 변환합니다.
 이터널 리턴 UI는 배율 min(가로/1920, 세로/1080)로 커지고 화면 중앙 기준으로
@@ -8,9 +11,6 @@
 
 import mss
 from PIL import Image, ImageDraw
-
-# 게임 창 제목 (부분 일치)
-GAME_WINDOW_TITLE_KEYWORD = "Eternal Return"
 
 REFERENCE_WIDTH = 1920
 REFERENCE_HEIGHT = 1080
@@ -87,18 +87,18 @@ def _grab(sct, box: dict) -> Image.Image:
     return Image.frombytes("RGB", shot.size, shot.rgb)
 
 
-def game_window() -> dict:
-    """게임 창의 화면 좌표와 크기. 창을 못 찾으면 RuntimeError.
+def game_window(title: str) -> dict:
+    """제목에 title이 들어간 게임 창의 화면 좌표와 크기. 못 찾으면 RuntimeError.
 
     반환: {"left", "top", "width", "height", "title", "active"}
     """
     import pygetwindow as gw  # Windows 전용이라 실제 캡처할 때만 import
 
-    windows = gw.getWindowsWithTitle(GAME_WINDOW_TITLE_KEYWORD)
+    windows = gw.getWindowsWithTitle(title)
     if not windows:
         raise RuntimeError(
-            f"'{GAME_WINDOW_TITLE_KEYWORD}' 제목의 창을 찾을 수 없습니다. "
-            "게임이 켜져 있는지, GAME_WINDOW_TITLE_KEYWORD가 창 제목과 맞는지 확인하세요."
+            f"'{title}' 제목의 창을 찾을 수 없습니다. "
+            "게임이 켜져 있는지, LUMI_GAME_WINDOW_TITLE이 창 제목과 맞는지 확인하세요."
         )
     # 같은 단어가 들어간 다른 창(브라우저 탭 등)이 있을 수 있어 가장 큰 창을 고름
     visible = [w for w in windows if not getattr(w, "isMinimized", False) and w.width > 0]
@@ -127,31 +127,6 @@ def game_window() -> dict:
     }
 
 
-def is_game_window_active() -> bool:
-    """게임 창이 맨 앞인지. 확인할 수 없으면 True."""
-    try:
-        return game_window()["active"]
-    except Exception:
-        return True
-
-
-def capture_crops(refine: bool = True) -> list[Image.Image]:
-    """지금 게임 화면의 닉네임 칸들 (NAME_REGIONS_REF 순서).
-
-    refine=False는 미세 보정 없이 항상 같은 위치를 자릅니다 (화면 상태 비교용).
-    """
-    window = game_window()
-    crops = []
-    with mss.mss() as sct:
-        for region in ui_regions(window["width"], window["height"]):
-            box = _search_box(region, window["height"]) if refine else region
-            shot = _grab(sct, {**box, "left": window["left"] + box["left"], "top": window["top"] + box["top"]})
-            if refine:
-                shot = _best_window(shot, region["height"], region["top"] - box["top"])
-            crops.append(shot)
-    return crops
-
-
 def _game_area(img: Image.Image) -> Image.Image:
     """스크린샷 아래쪽의 흰 여백을 잘라 게임 화면만 남김 (일부 테스트 이미지용)."""
     gray = img.convert("L")
@@ -175,11 +150,8 @@ def crops_from_image(image_path: str, refine: bool = True) -> list[Image.Image]:
     return crops
 
 
-def capture_window_snapshot() -> tuple[Image.Image, dict]:
-    """디버그용: 게임 화면 전체 캡처에 닉네임 칸 위치를 빨간 박스로 표시."""
-    window = game_window()
-    with mss.mss() as sct:
-        img = _grab(sct, window)
+def _mark_regions(img: Image.Image) -> Image.Image:
+    """닉네임 칸 위치를 빨간 박스로 표시 (칸 바깥 2px에 그려 칸 내용은 그대로)."""
     draw = ImageDraw.Draw(img)
     for r in ui_regions(img.width, img.height):
         draw.rectangle(
@@ -187,4 +159,52 @@ def capture_window_snapshot() -> tuple[Image.Image, dict]:
             outline=(255, 0, 0),
             width=2,
         )
-    return img, window
+    return img
+
+
+class LiveScreen:
+    """실제 게임 화면 (ports.ScreenSource)."""
+
+    def __init__(self, window_title: str):
+        self.window_title = window_title
+
+    def name_crops(self, refine: bool = True) -> list[Image.Image]:
+        # 창이 움직이거나 크기가 바뀌어도 맞도록 매번 창 위치를 다시 구함
+        window = game_window(self.window_title)
+        crops = []
+        with mss.mss() as sct:
+            for region in ui_regions(window["width"], window["height"]):
+                box = _search_box(region, window["height"]) if refine else region
+                shot = _grab(sct, {**box, "left": window["left"] + box["left"], "top": window["top"] + box["top"]})
+                if refine:
+                    shot = _best_window(shot, region["height"], region["top"] - box["top"])
+                crops.append(shot)
+        return crops
+
+    def is_active(self) -> bool:
+        try:
+            return game_window(self.window_title)["active"]
+        except Exception:
+            return True  # 확인할 수 없으면 경고하지 않음
+
+    def snapshot(self) -> tuple[Image.Image, dict]:
+        window = game_window(self.window_title)
+        with mss.mss() as sct:
+            return _mark_regions(_grab(sct, window)), window
+
+
+class ImageScreen:
+    """저장된 스크린샷 (ports.ScreenSource). path를 바꿔 가며 화면 전환을 흉내낼 수 있음."""
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def name_crops(self, refine: bool = True) -> list[Image.Image]:
+        return crops_from_image(self.path, refine=refine)
+
+    def is_active(self) -> bool:
+        return True
+
+    def snapshot(self) -> tuple[Image.Image, dict]:
+        img = _game_area(Image.open(self.path).convert("RGB"))
+        return _mark_regions(img), {"left": 0, "top": 0, "width": img.width, "height": img.height, "title": self.path}
