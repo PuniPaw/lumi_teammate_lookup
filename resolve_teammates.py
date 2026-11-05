@@ -8,15 +8,22 @@ OCR(teammate_ocr.py)이 한 이름당 여러 후보(kor+eng/eng/kor)를 내놓�
 첫 번째 후보를 정답으로 채택합니다. 어느 후보도 못 찾으면 None으로 남겨서
 나중에 사용자가 수동으로 고치거나 무시할 수 있게 합니다.
 
-실행 (단독 테스트): python resolve_teammates.py
+실행 (단독 테스트):
+  python resolve_teammates.py                          # 지금 게임 화면을 캡처
+  python resolve_teammates.py debug/match1_end.png     # 저장된 스크린샷으로
 """
 
 import os
+import sys
 
 from dotenv import load_dotenv
 from bserpy import Client, NotFoundError
 
-from teammate_ocr import get_teammate_ocr_results, lookalike_variants
+from teammate_ocr import (
+    get_teammate_ocr_results,
+    get_teammate_ocr_results_from_image,
+    lookalike_variants,
+)
 
 load_dotenv()
 API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
@@ -136,8 +143,17 @@ def main():
         print("ETERNAL_RETURN_API_KEY가 설정되지 않았습니다. .env를 확인하세요.")
         return
 
-    print("화면 캡처 + OCR 중... (게임 로비 화면이 떠 있어야 합니다)")
-    ocr_results = get_teammate_ocr_results(save_debug_images=True)
+    if len(sys.argv) > 1:
+        image_path = sys.argv[1]
+        print(f"스크린샷 OCR 중: {image_path}")
+        ocr_results = get_teammate_ocr_results_from_image(image_path)
+    else:
+        print("화면 캡처 + OCR 중... (게임 로비 화면이 떠 있어야 합니다)")
+        ocr_results = get_teammate_ocr_results(save_debug_images=True)
+
+    print("\n--- OCR 결과 ---")
+    for r in ocr_results:
+        print(f"{r['name']}: {r['best']!r} (점수 {r['confidence']})  후보: {r['candidates'][:6]}")
 
     with Client(api_key=API_KEY) as client:
         resolved = resolve_teammate_names(client, ocr_results)
