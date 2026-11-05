@@ -42,7 +42,12 @@ from overlay_demo import (
     load_character_names,
 )
 from resolve_teammates import resolve_teammate_names
-from teammate_ocr import capture_crops, capture_window_snapshot, get_teammate_ocr_results
+from teammate_ocr import (
+    capture_crops,
+    capture_window_snapshot,
+    get_teammate_ocr_results,
+    is_game_window_active,
+)
 
 load_dotenv()
 API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
@@ -73,6 +78,8 @@ def save_debug_snapshot(match_id: int, label: str):
             f"크기={window['width']}x{window['height']}, 캡처 이미지={img.width}x{img.height}"
             f" -> {path}"
         )
+        if not window.get("active", True):
+            print("  ⚠️ 게임 창이 맨 앞에 있지 않습니다. 다른 창이 게임을 가리면 그 창을 읽게 됩니다.")
     except Exception as e:
         print(f"  [디버그] 창 캡처 실패: {e}")
 
@@ -161,6 +168,8 @@ class MatchWorker(QObject):
         def read():
             nonlocal attempt
             attempt += 1
+            if not is_game_window_active():
+                print(f"  시도 {attempt}: ⚠️ 게임 창이 다른 창에 가려져 있음 (게임 창을 맨 앞으로)")
             results = get_teammate_ocr_results()
             summary = ", ".join(f"{r['best']!r}({r['confidence']})" for r in results)
             print(f"  시도 {attempt}: {summary}")

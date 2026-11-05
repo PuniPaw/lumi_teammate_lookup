@@ -73,7 +73,17 @@ def _get_game_window_rect() -> dict:
         "width": win.width,
         "height": win.height,
         "title": win.title,
+        # 화면을 '보이는 그대로' 캡처하므로, 다른 창이 게임을 가리면 그 창을 읽게 됨
+        "active": bool(getattr(win, "isActive", True)),
     }
+
+
+def is_game_window_active() -> bool:
+    """게임 창이 맨 앞(활성 창)인지. 확인할 수 없으면 True."""
+    try:
+        return _get_game_window_rect()["active"]
+    except Exception:
+        return True
 
 
 def capture_window_snapshot() -> tuple[Image.Image, dict]:
