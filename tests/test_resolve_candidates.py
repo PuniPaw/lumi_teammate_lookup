@@ -6,7 +6,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from resolve_teammates import _candidates_to_try  # noqa: E402
+from resolve_teammates import _candidates_to_try, _lookalike_candidates  # noqa: E402
+from teammate_ocr import lookalike_variants  # noqa: E402
 
 
 def _result(scores: dict) -> dict:
@@ -32,3 +33,18 @@ def test_drops_single_character_noise():
 def test_legacy_result_without_scores():
     legacy = {"variants": {"kor+eng": "PuniPaw", "eng": "PuniPaw", "kor": ""}}
     assert _candidates_to_try(legacy) == ["PuniPaw"]
+
+
+def test_lookalike_variants():
+    assert lookalike_variants("滕田皮卡丘")[0] == "藤田皮卡丘"
+    assert "静戒丨BS" in lookalike_variants("靜戒|BS")
+    assert lookalike_variants("PuniPaw") == []
+
+
+def test_lookalike_candidates_limits():
+    # 짧은 후보(2글자 이하)는 변형하지 않음 - 다른 유저와 우연히 일치할 위험
+    assert _lookalike_candidates(["滕田"]) == []
+    out = _lookalike_candidates(["滕田皮卡丘", "靜戒|BS"])
+    assert out[0] == "藤田皮卡丘"
+    assert len(out) <= 6
+    assert "滕田皮卡丘" not in out  # 이미 시도한 후보는 제외

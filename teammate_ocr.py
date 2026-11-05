@@ -548,6 +548,86 @@ def _separator_alternatives(s: str) -> list[str]:
     return alts
 
 
+# ---------------------------------------------------------------------------
+# 한자 위치별 투표 + 모양이 비슷한 글자 치환
+#
+# 획이 많은 한자는 작은 화면에서 뭉개져서 매번 다른 '비슷한 글자'로 읽힙니다.
+# (실게임 원본 크롭으로 96가지 설정을 시험한 결과 '藤'은 1번만 읽혔고,
+#  대부분 騰/滕/腾 또는 朋/腺/腰로 읽힘) 신뢰도도 낮아서 일반 후보에서는
+# 글자가 통째로 빠지기 일쑤입니다('藤田皮卡丘' -> '田皮卡丘').
+#  1) 위치별 투표: 한자/가나 언어팩이 읽은 글자를 x 위치로 묶고, 위치마다
+#     가장 많이 나온 글자로 문자열을 만듭니다 (신뢰도가 낮아도 버리지 않음).
+#  2) 비슷한 글자 치환: 아래 묶음 안의 글자로 바꾼 변형을 만들어 둡니다.
+#     API 조회는 일반 후보로 못 찾았을 때만, 몇 개까지만 시도합니다
+#     (resolve_teammates._lookalike_candidates).
+# ---------------------------------------------------------------------------
+
+# 작은 화면에서 서로 헷갈리는 글자 묶음 (실제로 관찰된 것 위주로 추가)
+CONFUSABLE_GROUPS = [
+    "藤騰滕腾朋",  # '藤田皮卡丘' 실게임 크롭에서 '藤'이 이 글자들로 읽힘
+    "静靜",  # 간체/일본 신자체 vs 번체 ('静戒丨BS')
+    "丨|",  # 한자 부수 vs 세로선
+]
+_CONFUSABLE = {ch: group for group in CONFUSABLE_GROUPS for ch in group}
+
+# 위치별 투표에서 한 위치로 인정할 최소 득표 수 (패스 x 언어팩 결과 중)
+MIN_POSITION_VOTES = 2
+
+# 위치별 투표 후보의 최소 점수 (resolve_teammates의 MIN_CANDIDATE_SCORE 이상이어야
+# API 조회 대상이 됨)
+MIN_CONSENSUS_SCORE = 60
+
+
+def _cjk_consensus(words_by_pass: dict) -> str:
+    """한자/가나 언어팩 결과로 위치별 투표 문자열을 만듭니다 (없으면 '')."""
+    chars = []  # (x 중심, 글자 폭, 글자, 가중치)
+    for words in words_by_pass.values():
+        for w in words:
+            if w["lang"] not in _CJK_LANGS:
+                continue
+            glyphs = [ch for ch in w["raw"] if _is_cjk(ch) or _is_kana(ch)]
+            if not glyphs or len(glyphs) != len(w["raw"]):
+                continue  # 영문 등이 섞인 단어는 위치를 나누기 어려워 제외
+            step = (w["x1"] - w["x0"]) / len(glyphs)
+            if step <= 0:
+                continue
+            for i, ch in enumerate(glyphs):
+                chars.append((w["x0"] + step * (i + 0.5), step, ch, w["conf"] + 10))
+    if not chars:
+        return ""
+
+    chars.sort()
+    clusters: list[dict] = []
+    for x, width, ch, weight in chars:
+        if clusters and x - clusters[-1]["x"] < width * 0.5:
+            c = clusters[-1]
+            c["n"] += 1
+            c["x"] += (x - c["x"]) / c["n"]
+        else:
+            clusters.append({"x": x, "n": 1, "votes": {}})
+            c = clusters[-1]
+        c["votes"][ch] = c["votes"].get(ch, 0) + weight
+
+    text = ""
+    for c in clusters:
+        if c["n"] >= MIN_POSITION_VOTES:
+            text += max(c["votes"], key=c["votes"].get)
+    return text
+
+
+def lookalike_variants(text: str, limit: int = 8) -> list[str]:
+    """CONFUSABLE_GROUPS로 글자를 바꾼 변형들 (원문 제외, 최대 limit개)."""
+    positions = [i for i, ch in enumerate(text) if ch in _CONFUSABLE]
+    variants = [text]
+    for i in positions:
+        expanded = []
+        for v in variants:
+            for alt in _CONFUSABLE[v[i]]:
+                expanded.append(v[:i] + alt + v[i + 1 :])
+        variants = list(dict.fromkeys(expanded))[: limit + 1]
+    return [v for v in variants if v != text][:limit]
+
+
 def _run_ocr(crop: Image.Image) -> dict:
     """크롭 이미지 하나에 대해 여러 전처리 × 여러 언어팩으로 OCR을 돌려
     후보 전체와 가장 그럴듯한 결과(best)를 반환합니다.
@@ -622,6 +702,14 @@ def _rank_candidates(words_by_pass: dict) -> dict:
             if alt and alt not in scores and not _is_junk(alt):
                 scores[alt] = scores[text] - 10
                 sources[alt] = sources[text] + "+alt"
+
+    # 한자 위치별 투표 후보. 위치 하나하나의 신뢰도는 낮을 수 있으므로,
+    # 기존 1등 후보보다 약간 낮은 점수로 넣습니다 (API 조회 대상에는 들어감).
+    consensus = _cjk_consensus(words_by_pass)
+    if len(consensus) >= 2 and not _is_junk(consensus) and consensus not in scores:
+        top = max(scores.values(), default=0)
+        scores[consensus] = max(MIN_CONSENSUS_SCORE, top - 5)
+        sources[consensus] = "cjk-consensus"
 
     ranked = sorted(scores, key=lambda t: scores[t], reverse=True)
     if not ranked:

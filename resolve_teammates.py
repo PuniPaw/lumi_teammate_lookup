@@ -16,7 +16,7 @@ import os
 from dotenv import load_dotenv
 from bserpy import Client, NotFoundError
 
-from teammate_ocr import get_teammate_ocr_results
+from teammate_ocr import get_teammate_ocr_results, lookalike_variants
 
 load_dotenv()
 API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
@@ -31,6 +31,36 @@ MAX_CANDIDATES = 8
 MIN_CANDIDATE_SCORE = 60  # OCR 점수(0~100+) 최소값
 CANDIDATE_SCORE_MARGIN = 25  # 1등 후보 점수와의 차이 허용 범위
 MIN_NICKNAME_LENGTH = 2  # 한 글자 후보는 대부분 잡음
+
+
+# 일반 후보로 못 찾았을 때 '모양이 비슷한 글자로 바꾼 변형'을 최대 몇 개 조회할지.
+# 짧은 닉네임은 변형이 다른 유저와 우연히 일치할 위험이 커서 제외합니다.
+MAX_LOOKALIKE_LOOKUPS = 6
+MIN_LOOKALIKE_LENGTH = 3
+
+
+def _lookalike_candidates(tried: list[str]) -> list[str]:
+    """이미 시도한 후보들의 '비슷한 글자' 변형 (예: '滕田皮卡丘' -> '藤田皮卡丘')."""
+    out = []
+    for text in tried:
+        if len(text) < MIN_LOOKALIKE_LENGTH:
+            continue
+        for v in lookalike_variants(text):
+            if v not in tried and v not in out:
+                out.append(v)
+    return out[:MAX_LOOKALIKE_LOOKUPS]
+
+
+def _lookup(client: Client, nickname: str):
+    """닉네임으로 유저를 조회. 없으면 None."""
+    try:
+        return client.users.get_uid(nickname)
+    except NotFoundError:
+        return None
+    except KeyError:
+        # bserpy가 '유저 없음' 상황에서 NotFoundError 대신
+        # KeyError(data["user"] 접근 실패)를 던지는 경우가 있음
+        return None
 
 
 def _candidates_to_try(result: dict) -> list[str]:
@@ -75,18 +105,19 @@ def resolve_teammate_names(client: Client, ocr_results: list[dict]) -> list[dict
         found_user_id = None
 
         for candidate in candidates:
-            try:
-                user = client.users.get_uid(candidate)
-                found_nickname = candidate
-                found_user_id = user.user_id
+            user = _lookup(client, candidate)
+            if user is not None:
+                found_nickname, found_user_id = candidate, user.user_id
                 break  # 찾았으면 더 시도할 필요 없음
-            except NotFoundError:
-                continue  # 이 후보는 아니었음, 다음 후보 시도
-            except KeyError:
-                # bserpy가 '유저 없음' 상황에서 NotFoundError 대신
-                # KeyError(data["user"] 접근 실패)를 던지는 경우가 있어서
-                # 이것도 '못 찾음'으로 취급하고 다음 후보로 넘어감
-                continue
+
+        # 못 찾았으면 '모양이 비슷한 글자'로 바꾼 변형을 몇 개 더 시도
+        if found_nickname is None:
+            for candidate in _lookalike_candidates(candidates):
+                candidates.append(candidate)
+                user = _lookup(client, candidate)
+                if user is not None:
+                    found_nickname, found_user_id = candidate, user.user_id
+                    break
 
         resolved.append(
             {

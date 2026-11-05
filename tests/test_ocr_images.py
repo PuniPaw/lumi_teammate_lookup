@@ -6,8 +6,9 @@
 EXPECTED에 (파일, 팀원 칸) -> 정답 닉네임을 적어 둡니다. 새 스크린샷을
 추가하면 여기에 정답을 같이 적어 두세요.
 - best 일치: OCR만으로 정답을 맞힘 (API 키가 없어도 정답이 표시됨)
-- API 조회 대상 포함: API 검증(resolve_teammates)이 실제로 조회하는 후보 안에
-  정답이 있음 -> API 키가 있으면 정답이 확정됨
+- API 조회 대상 포함: API 검증(resolve_teammates)이 실제로 조회하는 후보
+  (일반 후보 + 못 찾았을 때 시도하는 '비슷한 글자' 변형) 안에 정답이 있음
+  -> API 키가 있으면 정답이 확정됨
 """
 
 import os
@@ -16,8 +17,10 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from resolve_teammates import _candidates_to_try  # noqa: E402
-from teammate_ocr import get_teammate_ocr_results_from_image  # noqa: E402
+from PIL import Image  # noqa: E402
+
+from resolve_teammates import _candidates_to_try, _lookalike_candidates  # noqa: E402
+from teammate_ocr import get_teammate_ocr_results_from_image, ocr_crops  # noqa: E402
 
 # 정답 닉네임. None = 닉네임이 없는 화면(빈 칸)
 EXPECTED = {
@@ -36,16 +39,25 @@ EXPECTED = {
 CANDIDATE_ONLY = {
     ("matching_lobby_screen.png", 2),  # ya발견: 'y'/'V'가 이 폰트에서 거의 같음
     ("test2.png", 2),  # アンベリィ: 작은 'ィ'를 'イィ'로 두 번 읽는 경우가 있음
+    ("test4.png", 1),  # 静戒丨BS: 靜戒|BS -> 비슷한 글자 치환으로 찾음
+    ("lobby_16x10_chinese.webp", 1),  # 藤田皮卡丘: 첫 글자를 騰/滕/朋 등으로 읽음
 }
 
 # 아직 해결 못 한 칸 (테스트에서 제외, 개선 시 CANDIDATE_ONLY로 옮기기)
-KNOWN_FAILURES = {
-    # 静戒丨BS: 정답이 후보 목록(8위 안팎)엔 들어오지만 점수가 낮아 API 조회
-    # 대상에서 빠짐. 静/靜(간체/번체), 丨/| 구분이 어려움.
-    ("test4.png", 1),
-    # 藤田皮卡丘: 첫 글자 '藤'(획이 많은 한자)를 어떤 언어팩도 못 읽음 (신뢰도 0~25)
-    ("lobby_16x10_chinese.webp", 1),
-}
+KNOWN_FAILURES: set = set()
+
+
+def api_tried(result: dict) -> list[str]:
+    """resolve_teammates가 API로 조회하게 될 후보 전체 (조회 순서대로)."""
+    tried = _candidates_to_try(result)
+    return tried + _lookalike_candidates(tried)
+
+
+def test_native_resolution_crop():
+    """실게임 2880x1800 원본 크롭 (채팅 축소 없음): '藤田皮卡丘'"""
+    crop = Image.open(os.path.join(ROOT, "tests", "fixtures", "crop_2880x1800_fujita.png"))
+    result = ocr_crops([crop.convert("RGB")])[0]
+    assert "藤田皮卡丘" in api_tried(result)
 
 
 def _results():
@@ -61,7 +73,7 @@ def test_nicknames():
         if (image, idx) in KNOWN_FAILURES:
             continue
         if (image, idx) in CANDIDATE_ONLY:
-            ok = expected in _candidates_to_try(result)
+            ok = expected in api_tried(result)
         else:
             ok = result["best"] == expected
         if not ok:
@@ -77,7 +89,7 @@ if __name__ == "__main__":
     for image, idx, expected, result in _results():
         total += 1
         b = result["best"] == expected
-        c = expected in _candidates_to_try(result)
+        c = expected in api_tried(result)
         best_ok += b
         cand_ok += c
         rank = result["candidates"].index(expected) + 1 if expected in result["candidates"] else "-"
