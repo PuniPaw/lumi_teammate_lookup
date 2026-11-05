@@ -8,8 +8,7 @@ app.py는 이 인터페이스에만 의존하고, 실제 구현(어댑터)은 �
 |-------------------|-------------------------------------------|
 | ScreenSource      | capture.screen.LiveScreen (게임 화면)       |
 |                   | capture.screen.ImageScreen (스크린샷 파일)   |
-| NicknameReader    | ocr.paddle.PaddleReader (기본, PP-OCR)       |
-|                   | ocr.reader.TesseractReader                  |
+| NicknameReader    | ocr.paddle.PaddleReader (PP-OCR)            |
 | StatsProvider     | api.player_stats.EternalReturnStats         |
 | MatchSignals      | game.log.PlayerLog                          |
 """

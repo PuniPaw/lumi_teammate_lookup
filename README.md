@@ -14,9 +14,7 @@
    pip install -r requirements.txt
    ```
    닉네임 OCR은 PaddleOCR(PP-OCRv5) 인식 모델을 RapidOCR(ONNX)로 돌립니다. 처음 실행할 때 모델 파일 약 30MB를 ModelScope에서 받습니다.
-2. (선택) Tesseract OCR: `LUMI_OCR_ENGINE=tesseract`로 쓰거나 기존 테스트(`tests/test_ocr_images.py`)를 돌릴 때만 필요합니다
-   - Windows 기본 경로 `C:\Program Files\Tesseract-OCR`, 언어팩 Korean, Japanese, Chinese (Simplified), Chinese (Traditional)
-3. 저장소 폴더에 `.env` 파일
+2. 저장소 폴더에 `.env` 파일
    ```
    ETERNAL_RETURN_API_KEY=발급받은 키
    ```
@@ -39,8 +37,6 @@ python -m lumi
 | `LUMI_GAME_PROCESS` | 게임 프로세스 이름 | `EternalReturn.exe` |
 | `LUMI_GAME_WINDOW_TITLE` | 게임 창 제목 (부분 일치) | `Eternal Return` |
 | `LUMI_LOG_PATH` | 게임 로그 경로 | `%USERPROFILE%\AppData\LocalLow\NimbleNeuron\Eternal Return\Player.log` |
-| `LUMI_OCR_ENGINE` | 닉네임 OCR 엔진 (`paddle` / `tesseract`) | `paddle` (rapidocr가 없으면 `tesseract`) |
-| `LUMI_TESSERACT_CMD` | tesseract 실행 파일 | Windows 기본 설치 경로 또는 PATH |
 
 ## 구조
 
@@ -52,8 +48,8 @@ lumi/
   ports.py          외부 연결 인터페이스 (ScreenSource, NicknameReader, StatsProvider, MatchSignals)
   game/             process.py 게임 감시, log.py 매칭 감지(PlayerLog), match_flow.py 재시도/게임 시작 판단
   capture/          screen.py 닉네임 칸 위치 계산과 캡처 (LiveScreen, ImageScreen)
-  ocr/              __init__.py make_reader(엔진 선택), paddle.py (PaddleReader, 기본),
-                    chars.py 문자 종류, engine.py Tesseract, candidates.py 후보/점수, reader.py (TesseractReader)
+  ocr/              paddle.py PP-OCR (PaddleReader), image.py 테두리 제거/빈 칸 판별,
+                    chars.py 문자 종류, candidates.py 잡음 후보/비슷한 글자
   api/              resolve.py 닉네임 확정, player_stats.py 전적 (EternalReturnStats), recent_stats.py 최근 20게임
   ui/               overlay.py 모달
   debug/            store.py 디버그 이미지, crops.py / check.py 확인 도구
@@ -61,7 +57,7 @@ tests/              fixtures/ 실제 게임 화면
 docs/               개발 노트
 ```
 
-`app.py`는 `ports.py`의 인터페이스에만 의존하고, 실제 구현(게임 화면, Tesseract, Open API, 로그 파일)은 `build()`에서 설정으로 만들어 넘깁니다. 테스트에서는 가짜 구현을 넘깁니다.
+`app.py`는 `ports.py`의 인터페이스에만 의존하고, 실제 구현(게임 화면, PP-OCR, Open API, 로그 파일)은 `build()`에서 설정으로 만들어 넘깁니다. 테스트에서는 가짜 구현을 넘깁니다.
 
 ## 문제 확인
 
@@ -76,6 +72,6 @@ docs/               개발 노트
 pip install pytest
 python -m pytest tests
 ```
-`tests/fixtures/`의 실제 게임 화면으로 닉네임 인식 정확도를 확인합니다 (요약 출력: PP-OCR `python tests/test_paddle_reader.py`, Tesseract `python tests/test_ocr_images.py`). 엔진 비교: `python -m lumi.debug.compare_engines [debug]`.
+`tests/fixtures/`의 실제 게임 화면으로 닉네임 인식 정확도를 확인합니다 (요약 출력: `python tests/test_paddle_reader.py`).
 
 개발 과정과 설계 근거는 [docs/DEVELOPMENT_NOTES.md](docs/DEVELOPMENT_NOTES.md)에 있습니다.

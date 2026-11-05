@@ -1,8 +1,6 @@
-"""OCR 세부 동작: 잡음 필터, 빈 칸 생략, 빠른 단계, 닉네임 위치 계산."""
+"""OCR 세부 동작: 잡음 필터, 닉네임 위치 계산."""
 
-from conftest import name_crops
 from lumi.capture import screen
-from lumi.ocr import engine, reader
 from lumi.ocr.candidates import is_junk
 
 
@@ -12,27 +10,6 @@ def test_is_junk():
         assert is_junk(junk)
     for name in ("sooin", "静戒丨BS", "ya발견"):
         assert not is_junk(name)
-
-
-def _count_ocr_calls(monkeypatch) -> list:
-    calls = []
-    original = engine.ocr_words
-    monkeypatch.setattr(engine, "ocr_words", lambda *a: calls.append(1) or original(*a))
-    return calls
-
-
-def test_blank_slots_skip_ocr(monkeypatch):
-    calls = _count_ocr_calls(monkeypatch)
-    for name in ("team_lobby.png", "main.png"):
-        assert [r["best"] for r in reader.TesseractReader().read(name_crops(name))] == ["", "", ""]
-    assert calls == []
-
-
-def test_easy_names_use_fast_pass_only(monkeypatch):
-    calls = _count_ocr_calls(monkeypatch)
-    results = reader.TesseractReader().read(name_crops("normal_matched_lobby.png"))
-    assert [r["best"] for r in results] == ["PuniPaw", "BlackBrave", "HYUHAN"]
-    assert len(calls) == 3 * len(reader.FAST_LANGS)
 
 
 def test_ui_regions_scale_from_center():

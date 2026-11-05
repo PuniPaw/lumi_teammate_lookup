@@ -1,6 +1,6 @@
 """앱 전체 흐름 통합 테스트 (게임/API 없이, Qt offscreen).
 
-외부 연결(ports)에 가짜 구현을 넘깁니다. OCR은 실제 Tesseract로 저장된 화면을 읽습니다.
+외부 연결(ports)에 가짜 구현을 넘깁니다. OCR은 실제 PP-OCR로 저장된 화면을 읽습니다.
 매칭 신호 -> 닉네임 인식(재시도) -> 모달 표시 -> 화면이 바뀌면 모달 닫기.
 """
 
@@ -18,7 +18,7 @@ from lumi.api.player_stats import failed_stats  # noqa: E402
 from lumi.app import MatchWorker, OverlayController, connect  # noqa: E402
 from lumi.capture.screen import ImageScreen  # noqa: E402
 from lumi.debug.store import DebugStore  # noqa: E402
-from lumi.ocr.reader import TesseractReader  # noqa: E402
+from lumi.ocr.paddle import PaddleReader  # noqa: E402
 from lumi.ui.overlay import OverlayWindow  # noqa: E402
 
 
@@ -72,13 +72,14 @@ def _wait_until(app, cond, timeout=30.0):
 
 
 def test_match_shows_modal_then_closes_when_game_starts(tmp_path):
+    pytest.importorskip("rapidocr")
     app = QApplication.instance() or QApplication([])
     # 닉네임이 아직 안 그려진 화면 2번 -> 매칭 화면
     screen = SequenceScreen(fixture("test3.png"), [fixture("team_lobby.png")] * 2)
     signals, stats = FakeSignals(), FakeStats()
     debug = DebugStore(enabled=False, directory=str(tmp_path))
 
-    worker = MatchWorker(signals, screen, TesseractReader(), stats, debug)
+    worker = MatchWorker(signals, screen, PaddleReader(), stats, debug)
     controller = OverlayController(screen, stats, debug)
     controller.timer.setInterval(50)
     connect(worker, controller)

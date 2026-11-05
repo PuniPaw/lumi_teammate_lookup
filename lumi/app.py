@@ -209,7 +209,7 @@ def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
     from lumi.api.player_stats import EternalReturnStats
     from lumi.capture.screen import LiveScreen
     from lumi.game.log import PlayerLog
-    from lumi.ocr import make_reader
+    from lumi.ocr.paddle import PaddleReader
 
     screen = LiveScreen(settings.game_window_title)
     stats = EternalReturnStats(settings.api_key)
@@ -219,7 +219,7 @@ def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
         print(f"⚠️ {e} (캐릭터 이름 대신 코드로 표시됩니다)")
     debug = DebugStore(settings.debug, settings.debug_dir)
 
-    worker = MatchWorker(PlayerLog(settings.log_path), screen, make_reader(settings), stats, debug)
+    worker = MatchWorker(PlayerLog(settings.log_path), screen, PaddleReader(), stats, debug)
     controller = OverlayController(screen, stats, debug)
     connect(worker, controller)
     return worker, controller

@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image
 
 from lumi.capture.screen import NAME_REGIONS_REF
-from lumi.ocr import engine
+from lumi.ocr import image
 from lumi.ocr.candidates import empty_result, is_junk
 from lumi.ocr.chars import is_cjk, is_hangul, is_kana
 
@@ -28,7 +28,7 @@ MODELS = {
 }
 REC_HEIGHT = 48  # PP-OCR 인식 모델 입력 높이
 
-# 흰 글씨 픽셀 비율이 이보다 작으면 빈 칸으로 보고 OCR 생략. reader.py(0.05)보다 낮음:
+# 흰 글씨 픽셀 비율이 이보다 작으면 빈 칸으로 보고 OCR 생략. 0.05였다가 낮춤:
 # 2880x1800의 두 글자 닉네임 '르채'가 0.046 (빈 칸 최대 0.036). PP-OCR은 빨라서 생략할 이유가
 # 적고, 빈 칸을 읽어도 점수가 35 미만이라 '읽힌 칸'(75점)이나 API 조회(60점)가 되지 않음
 MIN_TEXT_PIXEL_RATIO = 0.02
@@ -38,7 +38,7 @@ MIN_TEXT_PIXEL_RATIO = 0.02
 OFF_SCRIPT_PENALTY = 30
 # 보조 후보(잡음 글자 제거, 구분자 치환)는 원래 후보보다 이만큼 낮게
 ALT_PENALTY = 10
-# 두 모델이 같은 글자를 읽으면 보너스 (Tesseract 쪽 '여러 패스 일치' 보너스와 같은 값)
+# 두 모델이 같은 글자를 읽으면 보너스
 AGREE_BONUS = 2
 
 # 글자 옆에 붙어 나오는 세로선 잡음 ('1얼음마녀'), 한자 닉네임의 구분자 '丨'를 읽은 글자 ('静戒IBS')
@@ -73,7 +73,7 @@ def _alternatives(text: str) -> list[str]:
 
 
 def combine(korean: tuple[str, float], ch: tuple[str, float]) -> dict:
-    """두 모델의 (글자, 0~1 점수)로 candidates.rank_candidates와 같은 형식의 결과를 만듭니다."""
+    """두 모델의 (글자, 0~1 점수)로 OCR 결과(candidates.empty_result와 같은 형식)를 만듭니다."""
     reads = {"korean": (clean(korean[0]), korean[1] * 100), "ch": (clean(ch[0]), ch[1] * 100)}
     has_hangul = any(is_hangul(c) for c in reads["korean"][0])
     has_cjk = any(is_cjk(c) or is_kana(c) for c in reads["ch"][0])
@@ -148,8 +148,8 @@ class PaddleReader:
         self._lock = threading.Lock()  # ONNX 세션을 여러 스레드에서 동시에 쓰지 않도록
 
     def read_crop(self, crop: Image.Image) -> dict:
-        crop = engine.trim_edge_columns(crop)
-        if engine.text_pixel_ratio(crop) < MIN_TEXT_PIXEL_RATIO:
+        crop = image.trim_edge_columns(crop)
+        if image.text_pixel_ratio(crop) < MIN_TEXT_PIXEL_RATIO:
             return empty_result()
         img = _prepare(crop)
         with self._lock:

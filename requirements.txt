@@ -2,7 +2,6 @@ PySide6>=6.7.0
 pygetwindow>=0.0.9
 pywin32>=306; sys_platform == "win32"
 mss>=9.0.2
-pytesseract>=0.3.13
 Pillow>=12.0.0
 bserpy>=0.1.0
 python-dotenv>=1.0.0

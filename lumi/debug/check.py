@@ -11,7 +11,7 @@ from bserpy import Client
 from lumi.api.resolve import resolve_teammate_names
 from lumi.capture.screen import ImageScreen, LiveScreen
 from lumi.config import load_settings
-from lumi.ocr import make_reader
+from lumi.ocr.paddle import PaddleReader
 
 
 def main() -> None:
@@ -21,7 +21,7 @@ def main() -> None:
         return
 
     screen = ImageScreen(sys.argv[1]) if len(sys.argv) > 1 else LiveScreen(settings.game_window_title)
-    ocr_results = make_reader(settings).read(screen.name_crops())
+    ocr_results = PaddleReader().read(screen.name_crops())
 
     print("--- OCR 결과 ---")
     for r in ocr_results:

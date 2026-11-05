@@ -1,7 +1,9 @@
 """PP-OCR 리더 (lumi.ocr.paddle).
 
 - 결과 고르기(combine): 모델 없이 가짜 결과로
-- 실제 화면: rapidocr가 설치돼 있을 때만 (처음엔 모델 다운로드)
+- 실제 화면: 저장된 게임 화면으로 닉네임 인식 정확도를 확인하는 회귀 테스트.
+  rapidocr가 설치돼 있을 때만 (처음엔 모델 다운로드).
+  새 스크린샷을 tests/fixtures/에 넣으면 EXPECTED에 정답도 적어 두세요.
 
 정확도 요약 출력: python tests/test_paddle_reader.py
 """
@@ -10,14 +12,31 @@ import pytest
 from PIL import Image
 
 from conftest import fixture, name_crops
+from lumi.api.resolve import candidates_to_try, lookalike_candidates
 from lumi.game.match_flow import slot_ready
 from lumi.ocr import paddle
-from test_ocr_images import EXPECTED, api_tried
 
-# 1순위는 아니어도 API 조회 후보 안에 정답이 있으면 통과
+EXPECTED = {
+    "matching_lobby_screen.png": ["PuniPaw", "sooin", "ya발견"],
+    "normal_matched_lobby.png": ["PuniPaw", "BlackBrave", "HYUHAN"],
+    "test2.png": ["PuniPaw", "MirNight", "アンベリィ"],
+    "test3.png": ["PuniPaw", "로즈만때리는루크", "마브하라"],
+    "test4.png": ["PuniPaw", "静戒丨BS", "레몬데몬"],
+    # 16:10 실게임 화면 (2880x1800을 2000x1250으로 축소한 것)
+    "lobby_16x10.webp": ["PuniPaw", "12345a", "얼음마녀"],
+    "lobby_16x10_chinese.webp": ["PuniPaw", "藤田皮卡丘", "불법체류자엠마"],
+    "lobby_16x10_portrait.webp": ["PuniPaw", "라비에오", "124qer123"],
+}
+
+# 1순위는 아니어도 API 조회 후보(+ 비슷한 글자 변형) 안에 정답이 있으면 통과
 API_RESOLVED = {
     ("test4.png", 1),  # '丨'을 'I'로 읽음 -> 보조 후보 '静戒丨BS'
 }
+
+
+def api_tried(result: dict) -> list[str]:
+    tried = candidates_to_try(result)
+    return tried + lookalike_candidates(tried)
 
 
 # ---- 결과 고르기 ----
