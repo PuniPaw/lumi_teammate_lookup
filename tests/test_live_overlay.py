@@ -54,7 +54,11 @@ def test_match_shows_modal_then_closes_when_game_starts(tmp_path, monkeypatch):
 
     screen = {"name": "test3.png"}
     monkeypatch.setattr(live_overlay, "get_teammate_ocr_results", fake_ocr)
-    monkeypatch.setattr(live_overlay, "capture_crops", lambda: crops_from_image(_img(screen["name"])))
+    monkeypatch.setattr(
+        live_overlay,
+        "capture_crops",
+        lambda refine=True: crops_from_image(_img(screen["name"]), refine=refine),
+    )
 
     seen = {}
 

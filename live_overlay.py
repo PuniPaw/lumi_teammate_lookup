@@ -192,7 +192,11 @@ class MatchWorker(QObject):
         if superseded() or not team_stats:
             return
 
-        reference = [r["crop_image"] for r in results]
+        # 게임 시작 감지 기준 이미지: 미세 보정 없이 '항상 같은 위치'를 캡처
+        try:
+            reference = capture_crops(refine=False)
+        except Exception:
+            reference = [r["crop_image"] for r in results]
         self.team_ready.emit(team_stats, reference)
 
 
@@ -234,7 +238,7 @@ class OverlayController(QObject):
             self.close_overlay()
             return
         try:
-            current = capture_crops()
+            current = capture_crops(refine=False)
         except Exception:
             current = None  # 게임 창을 못 찾음 -> '사라짐'으로 취급
         if self.presence.update(current):

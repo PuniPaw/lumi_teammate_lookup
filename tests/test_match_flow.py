@@ -7,7 +7,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from match_flow import LobbyPresence, background_difference, slot_ready, wait_for_teammates  # noqa: E402
-from teammate_ocr import crops_from_image  # noqa: E402
+from teammate_ocr import crops_from_image as _crops  # noqa: E402
+
+
+def crops_from_image(path):
+    # 게임 시작 감지는 항상 같은 위치(미세 보정 없음)를 비교함
+    return _crops(path, refine=False)
 
 
 def _img(name):
@@ -105,6 +110,7 @@ LOBBIES = [
     "test2.png",
     "test3.png",
     "test4.png",
+    "lobby_16x10.webp",
 ]
 NOT_LOBBIES = ["team_lobby.png", "mode_change.png", "main.png"]
 

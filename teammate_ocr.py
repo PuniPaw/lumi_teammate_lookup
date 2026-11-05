@@ -33,17 +33,97 @@ os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 # 게임 창을 찾을 때 쓰는 제목(부분 일치). 실제 창 제목이 다르면 수정하세요.
 GAME_WINDOW_TITLE_KEYWORD = "Eternal Return"
 
-# 팀원별 닉네임 영역을, 절대 픽셀이 아니라 "게임 창 크기 대비 비율(0~1)"로
-# 정의합니다. 이러면 모니터가 바뀌거나 해상도가 달라져도(같은 종횡비라면)
-# 자동으로 올바른 위치를 계산할 수 있습니다.
-# (실제 게임 창 크기 1920x1716 기준으로 측정한 절대좌표를 비율로 환산한 값.
-#  주의: 이 게임 창은 16:9(1080)가 아니라 1716 높이임 - 하단에 채팅/번역
-#  패널이 포함된 크기로 보임)
-CROP_REGIONS_PCT = [
-    {"name": "teammate_1", "left": 0.5625, "top": 0.5449, "width": 0.0703, "height": 0.0087},
-    {"name": "teammate_2", "left": 0.7109, "top": 0.5449, "width": 0.0703, "height": 0.0087},
-    {"name": "teammate_3", "left": 0.8672, "top": 0.5449, "width": 0.0625, "height": 0.0087},
+# ---------------------------------------------------------------------------
+# 닉네임 영역 좌표
+#
+# 기준 해상도 1920x1080 화면에서 잰 팀원별 닉네임 영역(픽셀)입니다.
+# 이터널 리턴 UI는 해상도에 따라
+#   - 배율 = min(가로/1920, 세로/1080) 로 커지고
+#   - 화면 '중앙'을 기준으로 배치됩니다.
+# (1920x1080과 2880x1800(16:10) 화면을 비교해서 확인: 2880x1800에서는
+#  배율 1.5(가로 기준), 닉네임 카드도 중앙 기준 거리 x1.5 위치에 있음)
+# 그래서 아래 기준 좌표를 ui_regions()로 변환하면 해상도/화면 비율이 달라도
+# 같은 공식으로 위치를 계산할 수 있습니다.
+# ---------------------------------------------------------------------------
+REFERENCE_WIDTH = 1920
+REFERENCE_HEIGHT = 1080
+NAME_REGIONS_REF = [
+    {"name": "teammate_1", "left": 1080, "top": 935, "width": 134, "height": 14},
+    {"name": "teammate_2", "left": 1364, "top": 935, "width": 134, "height": 14},
+    {"name": "teammate_3", "left": 1665, "top": 935, "width": 120, "height": 14},
 ]
+
+# 위치 미세 보정: 계산한 위치에서 위아래로 '영역 높이 x 이 값'만큼 넓게
+# 캡처한 뒤, 글자가 가장 잘 들어오는 위치를 고릅니다 (몇 픽셀 어긋나도 보정).
+VERTICAL_SEARCH_RATIO = 1.0
+
+
+def ui_regions(width: int, height: int) -> list[dict]:
+    """게임 화면 크기(width x height)에서의 닉네임 영역 좌표를 계산합니다.
+    좌표는 게임 화면 왼쪽 위 기준."""
+    scale = min(width / REFERENCE_WIDTH, height / REFERENCE_HEIGHT)
+    cx, cy = width / 2, height / 2
+    regions = []
+    for r in NAME_REGIONS_REF:
+        regions.append(
+            {
+                "name": r["name"],
+                "left": round(cx + (r["left"] - REFERENCE_WIDTH / 2) * scale),
+                "top": round(cy + (r["top"] - REFERENCE_HEIGHT / 2) * scale),
+                "width": max(1, round(r["width"] * scale)),
+                "height": max(1, round(r["height"] * scale)),
+            }
+        )
+    return regions
+
+
+def _search_box(region: dict, area_height: int) -> dict:
+    """미세 보정용으로 위아래를 넓힌 캡처 영역."""
+    pad = round(region["height"] * VERTICAL_SEARCH_RATIO)
+    top = max(0, region["top"] - pad)
+    bottom = min(area_height, region["top"] + region["height"] + pad)
+    return {**region, "top": top, "height": max(region["height"], bottom - top)}
+
+
+def _best_window(strip: Image.Image, height: int, expected_offset: int) -> Image.Image:
+    """위아래로 넓게 캡처한 strip에서, 글자가 가장 많이 들어오는 높이 height의
+    구간을 잘라 반환합니다. 글자가 없으면 예상 위치를 그대로 씁니다.
+
+    '글자 양'은 행마다 '옆 픽셀과 밝기 차이가 큰 지점'의 수로 셉니다.
+    닉네임 아래의 색깔 진행 막대나 카드 테두리처럼 가로로 균일한 밝은 띠는
+    이 값이 거의 0이라 글자로 착각하지 않습니다.
+    """
+    expected_offset = min(max(0, expected_offset), max(0, strip.height - height))
+    gray = strip.convert("L")
+    w = gray.width
+    px = gray.load()
+    row_edges = [
+        sum(1 for x in range(1, w) if abs(px[x, y] - px[x - 1, y]) > EDGE_THRESHOLD)
+        for y in range(gray.height)
+    ]
+
+    best_y, best_count = expected_offset, -1
+    for y in range(0, max(1, gray.height - height + 1)):
+        count = sum(row_edges[y : y + height])
+        # 같은 양이면 예상 위치에 더 가까운 쪽
+        if count > best_count or (
+            count == best_count and abs(y - expected_offset) < abs(best_y - expected_offset)
+        ):
+            best_y, best_count = y, count
+    if best_count < MIN_EDGES_FOR_TEXT:
+        best_y = expected_offset
+    # 'y', 'g' 같은 글자의 꼬리가 잘리지 않도록 위아래로 약간 여유를 둠
+    margin = max(1, round(height * WINDOW_MARGIN_RATIO))
+    top = max(0, best_y - margin)
+    bottom = min(gray.height, best_y + height + margin)
+    return strip.crop((0, top, strip.width, bottom))
+
+
+# _best_window에서 '글자 경계'로 볼 이웃 픽셀 밝기 차이, 글자가 있다고 볼 최소 경계 수
+EDGE_THRESHOLD = 60
+MIN_EDGES_FOR_TEXT = 20
+# 고른 구간 위아래에 더하는 여유 (영역 높이 대비)
+WINDOW_MARGIN_RATIO = 0.08
 
 
 def _get_game_window_rect() -> dict:
@@ -67,11 +147,26 @@ def _get_game_window_rect() -> dict:
     # 최소화되지 않은 창 중 가장 큰 창을 게임 창으로 봅니다.
     visible = [w for w in windows if not getattr(w, "isMinimized", False) and w.width > 0]
     win = max(visible or windows, key=lambda w: w.width * w.height)
+    left, top, width, height = win.left, win.top, win.width, win.height
+
+    # 창 모드에서는 창 크기에 제목 표시줄/테두리가 포함되므로, 실제 게임이
+    # 그려지는 '클라이언트 영역'을 씁니다. (pywin32가 없으면 창 크기 그대로)
+    try:
+        import win32gui
+
+        hwnd = win._hWnd
+        _, _, client_w, client_h = win32gui.GetClientRect(hwnd)
+        client_left, client_top = win32gui.ClientToScreen(hwnd, (0, 0))
+        if client_w > 0 and client_h > 0:
+            left, top, width, height = client_left, client_top, client_w, client_h
+    except Exception:
+        pass
+
     return {
-        "left": win.left,
-        "top": win.top,
-        "width": win.width,
-        "height": win.height,
+        "left": left,
+        "top": top,
+        "width": width,
+        "height": height,
         "title": win.title,
         # 화면을 '보이는 그대로' 캡처하므로, 다른 창이 게임을 가리면 그 창을 읽게 됨
         "active": bool(getattr(win, "isActive", True)),
@@ -87,15 +182,15 @@ def is_game_window_active() -> bool:
 
 
 def capture_window_snapshot() -> tuple[Image.Image, dict]:
-    """디버그용: 게임 창 전체를 캡처하고, 닉네임 크롭 영역을 빨간 박스로
-    표시한 이미지와 창 정보를 반환합니다. (좌표가 맞는지 눈으로 확인용)"""
+    """디버그용: 게임 화면 전체를 캡처하고, 닉네임 영역(계산된 위치)을 빨간
+    박스로 표시한 이미지와 창 정보를 반환합니다. (좌표가 맞는지 확인용)"""
     from PIL import ImageDraw
 
     window = _get_game_window_rect()
     with mss.mss() as sct:
         img = _capture_region(sct, window)
     draw = ImageDraw.Draw(img)
-    for region in _resolve_crop_regions_for_image(img.width, img.height):
+    for region in ui_regions(img.width, img.height):
         draw.rectangle(
             (
                 region["left"] - 2,
@@ -109,41 +204,20 @@ def capture_window_snapshot() -> tuple[Image.Image, dict]:
     return img, window
 
 
-def _resolve_crop_regions() -> list[dict]:
-    """비율(CROP_REGIONS_PCT)을, 지금 실제 게임 창 위치/크기 기준의
-    절대 픽셀 좌표로 환산합니다."""
-    window = _get_game_window_rect()
-    resolved = []
-    for region in CROP_REGIONS_PCT:
-        resolved.append(
-            {
-                "name": region["name"],
-                "left": window["left"] + int(region["left"] * window["width"]),
-                "top": window["top"] + int(region["top"] * window["height"]),
-                "width": int(region["width"] * window["width"]),
-                "height": int(region["height"] * window["height"]),
-            }
-        )
-    return resolved
-
-
-def _resolve_crop_regions_for_image(img_width: int, img_height: int) -> list[dict]:
-    """이미지 파일 크기를 '창 크기'로 간주하고 비율을 절대좌표로 환산합니다.
-
-    스크린샷 파일이 게임 창(또는 화면) 전체를 담고 있다는 전제입니다.
-    """
-    resolved = []
-    for region in CROP_REGIONS_PCT:
-        resolved.append(
-            {
-                "name": region["name"],
-                "left": int(region["left"] * img_width),
-                "top": int(region["top"] * img_height),
-                "width": int(region["width"] * img_width),
-                "height": int(region["height"] * img_height),
-            }
-        )
-    return resolved
+def _game_area(img: Image.Image) -> Image.Image:
+    """스크린샷 아래쪽에 붙은 흰 여백을 잘라 게임 화면만 남깁니다.
+    (저장소의 테스트 스크린샷은 1920x1080 게임 화면 아래에 흰 여백이 붙은
+     1920x1716 이미지라서 필요함)"""
+    gray = img.convert("L")
+    w, h = gray.size
+    bottom = h
+    while bottom > 1:
+        row = gray.crop((0, bottom - 1, w, bottom))
+        lo, _ = row.getextrema()
+        if lo < 240:
+            break
+        bottom -= 1
+    return img if bottom == h else img.crop((0, 0, w, bottom))
 
 
 def _capture_region(sct, region: dict) -> Image.Image:
@@ -541,31 +615,48 @@ def _rank_candidates(words_by_pass: dict) -> dict:
     }
 
 
-def capture_crops() -> list[Image.Image]:
-    """지금 게임 화면에서 팀원별 닉네임 영역을 캡처해 CROP_REGIONS_PCT 순서대로
-    반환합니다 (OCR은 하지 않음 - 화면 상태 비교 등 가벼운 용도)."""
+def capture_crops(refine: bool = True) -> list[Image.Image]:
+    """지금 게임 화면에서 팀원별 닉네임 영역을 캡처해 NAME_REGIONS_REF 순서대로
+    반환합니다 (OCR은 하지 않음).
+
+    refine=True면 위아래를 넓게 캡처해서 글자가 가장 잘 들어오는 위치로
+    미세 보정합니다. 화면 상태 비교(게임 시작 감지)처럼 항상 같은 위치를
+    봐야 하는 용도에는 refine=False를 씁니다.
+    """
     # 매번 실행 시점의 실제 게임 창 위치/크기를 기준으로 좌표를 다시 계산
     # (모니터가 바뀌거나 창이 이동해도 항상 정확한 위치를 계산함)
-    crop_regions = _resolve_crop_regions()
-    with mss.mss() as sct:
-        return [_capture_region(sct, region) for region in crop_regions]
-
-
-def crops_from_image(image_path: str) -> list[Image.Image]:
-    """저장된 스크린샷에서 capture_crops()와 같은 크롭을 만듭니다 (테스트용)."""
-    full_img = Image.open(image_path).convert("RGB")
+    window = _get_game_window_rect()
     crops = []
-    for region in _resolve_crop_regions_for_image(full_img.width, full_img.height):
-        crops.append(
-            full_img.crop(
-                (
-                    region["left"],
-                    region["top"],
-                    region["left"] + region["width"],
-                    region["top"] + region["height"],
-                )
+    with mss.mss() as sct:
+        for region in ui_regions(window["width"], window["height"]):
+            box = _search_box(region, window["height"]) if refine else region
+            shot = _capture_region(
+                sct,
+                {
+                    "left": window["left"] + box["left"],
+                    "top": window["top"] + box["top"],
+                    "width": box["width"],
+                    "height": box["height"],
+                },
             )
+            if refine:
+                shot = _best_window(shot, region["height"], region["top"] - box["top"])
+            crops.append(shot)
+    return crops
+
+
+def crops_from_image(image_path: str, refine: bool = True) -> list[Image.Image]:
+    """저장된 스크린샷에서 capture_crops()와 같은 크롭을 만듭니다 (테스트용)."""
+    full_img = _game_area(Image.open(image_path).convert("RGB"))
+    crops = []
+    for region in ui_regions(full_img.width, full_img.height):
+        box = _search_box(region, full_img.height) if refine else region
+        strip = full_img.crop(
+            (box["left"], box["top"], box["left"] + box["width"], box["top"] + box["height"])
         )
+        if refine:
+            strip = _best_window(strip, region["height"], region["top"] - box["top"])
+        crops.append(strip)
     return crops
 
 
@@ -573,7 +664,7 @@ def ocr_crops(crops: list[Image.Image], save_debug_images: bool = False) -> list
     """크롭 이미지 목록에 OCR을 돌려 팀원별 결과를 반환합니다.
     각 결과에는 원본 크롭("crop_image")도 같이 담습니다."""
     results = []
-    for region, crop_img in zip(CROP_REGIONS_PCT, crops):
+    for region, crop_img in zip(NAME_REGIONS_REF, crops):
         name = region["name"]
         if save_debug_images:
             crop_img.save(f"debug_crop_{name}.png")
@@ -583,7 +674,7 @@ def ocr_crops(crops: list[Image.Image], save_debug_images: bool = False) -> list
 
 
 def get_teammate_ocr_results(save_debug_images: bool = False) -> list[dict]:
-    """팀원별 OCR 결과(후보 전체 포함)를 CROP_REGIONS_PCT 순서대로 반환합니다.
+    """팀원별 OCR 결과(후보 전체 포함)를 NAME_REGIONS_REF 순서대로 반환합니다.
 
     각 원소: {"name": "teammate_1", "best": "PuniPaw",
               "best_source": "eng@x6", "confidence": 91.0,
@@ -615,8 +706,8 @@ def get_teammate_ocr_results_from_image(
 
     게임을 매번 실행하지 않고도 크롭 좌표/전처리/OCR을 반복 테스트할 수
     있어서 개발 중에 유용합니다. 이미지 전체가 게임 창(또는 전체화면)을
-    담고 있다는 전제로, 이미지 크기를 기준으로 CROP_REGIONS_PCT를
-    절대좌표로 환산합니다.
+    담고 있다는 전제로, 이미지 크기를 기준으로 ui_regions()로 위치를
+    계산합니다 (아래쪽 흰 여백은 자동으로 잘라냄).
 
     반환 형식은 get_teammate_ocr_results()와 동일합니다.
     """

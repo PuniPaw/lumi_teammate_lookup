@@ -39,3 +39,14 @@ def test_easy_names_use_fast_pass_only(monkeypatch):
     results = t.get_teammate_ocr_results_from_image(os.path.join(ROOT, "normal_matched_lobby.png"))
     assert [r["best"] for r in results] == ["PuniPaw", "BlackBrave", "HYUHAN"]
     assert len(calls) == 3 * len(t.FAST_LANGS)
+
+
+def test_ui_regions_scale_from_center():
+    # 기준 해상도에서는 기준 좌표 그대로
+    assert t.ui_regions(1920, 1080) == [dict(r) for r in t.NAME_REGIONS_REF]
+    # 16:10 (2880x1800): 배율 min(1.5, 1.667) = 1.5, 화면 중앙 기준
+    r = t.ui_regions(2880, 1800)[0]
+    assert (r["left"], r["top"], r["width"], r["height"]) == (1620, 1492, 201, 21)
+    # 같은 비율이면 크기에 비례 (3840x2160 = 2배)
+    r = t.ui_regions(3840, 2160)[2]
+    assert (r["left"], r["top"], r["width"], r["height"]) == (3330, 1870, 240, 28)
