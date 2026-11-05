@@ -461,8 +461,18 @@ def _build_candidates(words: list[dict], text_width: float) -> list[tuple[str, f
 
     # (2) 병합 후보: 신뢰도 높은 단어부터 위치가 겹치지 않게 채택.
     #     한자 언어팩은 하나씩만 섞어서 언어팩별로 후보를 따로 만듭니다.
+    #     한글(kor)과 한자/가나(jpn, chi_*)는 한 후보에 섞지 않습니다. 실제로
+    #     섞인 닉네임은 드물고, 섞으면 한자를 한글로 잘못 읽은 글자가 끼어듦
+    #     (예: '藤田皮卡丘' -> 'ie田皮卡드', '불법체류자엠마' -> '量법체류자엠마').
+    #     한자 언어팩이 읽은 '영문 단어'는 한글 후보에도 씁니다 ('ya발견').
+    pools = {}
     for cjk_lang in _CJK_LANGS:
-        pool = [w for w in usable if w["lang"] in ("eng", "kor", cjk_lang)]
+        cjk_latin = [
+            w for w in usable if w["lang"] == cjk_lang and all(_is_latin(ch) for ch in w["text"])
+        ]
+        pools[f"hangul-{cjk_lang}"] = [w for w in usable if w["lang"] in ("eng", "kor")] + cjk_latin
+        pools[cjk_lang] = [w for w in usable if w["lang"] in ("eng", cjk_lang)]
+    for pool_name, pool in pools.items():
         chosen: list[dict] = []
         for w in sorted(pool, key=lambda w: w["conf"], reverse=True):
             if all(_overlap_ratio(w, c) < 0.3 for c in chosen):
@@ -474,7 +484,7 @@ def _build_candidates(words: list[dict], text_width: float) -> list[tuple[str, f
         if text:
             conf = sum(w["conf"] for w in chosen) / len(chosen)
             coverage = min(1.0, _span(chosen) / text_width)
-            candidates.append((text, conf * coverage, f"merged-{cjk_lang}"))
+            candidates.append((text, conf * coverage, f"merged-{pool_name}"))
 
     return candidates
 
