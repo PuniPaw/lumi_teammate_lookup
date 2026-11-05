@@ -25,8 +25,16 @@ QUEUE_KEYWORDS = [
 ]
 
 
+def is_match_complete(line: str) -> bool:
+    """로그 한 줄이 매칭 완료 신호인지."""
+    return any(kw in line for kw in MATCH_COMPLETE_KEYWORDS)
+
+
 def follow(path: str):
-    """새로 추가되는 줄만 계속 읽어오는 tail -f 스타일 제너레이터."""
+    """새로 추가되는 줄만 계속 읽어오는 tail -f 스타일 제너레이터.
+
+    게임을 재시작하면 Player.log가 처음부터 다시 쓰이므로(파일 크기가
+    줄어듦), 그 경우 파일 처음부터 다시 읽습니다."""
     # 파일이 생성되기 전일 수도 있으니 대기
     while not os.path.exists(path):
         print(f"[대기] 로그 파일이 아직 없습니다: {path}")
@@ -38,6 +46,12 @@ def follow(path: str):
         while True:
             line = f.readline()
             if not line:
+                try:
+                    if os.path.getsize(path) < f.tell():
+                        f.seek(0)  # 로그 파일이 새로 쓰이기 시작함
+                        continue
+                except OSError:
+                    pass
                 time.sleep(0.3)  # 너무 자주 폴링하지 않도록
                 continue
             yield line
@@ -50,13 +64,9 @@ def main():
     for line in follow(LOG_PATH):
         stripped = line.strip()
 
-        for kw in MATCH_COMPLETE_KEYWORDS:
-            if kw in stripped:
-                print(f"\n🎯 매칭 완료 감지! -> {stripped}")
-                print("여기서 팀원 공개 OCR 파이프라인을 트리거하면 됩니다.\n")
-                # TODO: 여기서 teammate_ocr.py 파이프라인 호출
-                # trigger_overlay()
-                break
+        if is_match_complete(stripped):
+            print(f"\n🎯 매칭 완료 감지! -> {stripped}")
+            print("(실제 모달 표시는 live_overlay.py가 담당합니다)\n")
         else:
             for kw in QUEUE_KEYWORDS:
                 if kw in stripped:

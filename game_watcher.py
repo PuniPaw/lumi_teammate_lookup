@@ -9,11 +9,11 @@
   3) python game_watcher.py 로 실행해두면, 이후로는 게임만 켜고 끄면
      알아서 오버레이가 따라 켜지고 꺼집니다.
 
-지금은 overlay_demo.py(가짜 데이터)를 띄우도록 되어 있습니다.
-실제 파이프라인(OCR + Open API 조회)이 완성되면 오버레이 진입점을
-그쪽으로 바꾸면 됩니다.
+게임이 켜지면 live_overlay.py(로그 감시 -> 매칭 완료 시 OCR + 전적 모달,
+게임 시작 시 모달 자동 닫기)를 실행합니다.
 """
 
+import os
 import subprocess
 import sys
 import time
@@ -23,8 +23,8 @@ import psutil
 # TODO: 작업 관리자에서 확인한 실제 프로세스 이름으로 바꾸세요.
 GAME_PROCESS_NAME = "EternalReturn-Win64-Shipping.exe"
 
-# 지금 띄울 오버레이 스크립트 (나중에 실전 파이프라인으로 교체)
-OVERLAY_SCRIPT = "overlay_demo.py"
+# 게임이 켜지면 실행할 스크립트 (같은 폴더 기준)
+OVERLAY_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live_overlay.py")
 
 # 몇 초 간격으로 게임 실행 여부를 확인할지
 POLL_INTERVAL_SECONDS = 5

@@ -430,34 +430,61 @@ def _run_ocr(crop: Image.Image) -> dict:
     }
 
 
+def capture_crops() -> list[Image.Image]:
+    """지금 게임 화면에서 팀원별 닉네임 영역을 캡처해 CROP_REGIONS_PCT 순서대로
+    반환합니다 (OCR은 하지 않음 - 화면 상태 비교 등 가벼운 용도)."""
+    # 매번 실행 시점의 실제 게임 창 위치/크기를 기준으로 좌표를 다시 계산
+    # (모니터가 바뀌거나 창이 이동해도 항상 정확한 위치를 계산함)
+    crop_regions = _resolve_crop_regions()
+    with mss.mss() as sct:
+        return [_capture_region(sct, region) for region in crop_regions]
+
+
+def crops_from_image(image_path: str) -> list[Image.Image]:
+    """저장된 스크린샷에서 capture_crops()와 같은 크롭을 만듭니다 (테스트용)."""
+    full_img = Image.open(image_path).convert("RGB")
+    crops = []
+    for region in _resolve_crop_regions_for_image(full_img.width, full_img.height):
+        crops.append(
+            full_img.crop(
+                (
+                    region["left"],
+                    region["top"],
+                    region["left"] + region["width"],
+                    region["top"] + region["height"],
+                )
+            )
+        )
+    return crops
+
+
+def ocr_crops(crops: list[Image.Image], save_debug_images: bool = False) -> list[dict]:
+    """크롭 이미지 목록에 OCR을 돌려 팀원별 결과를 반환합니다.
+    각 결과에는 원본 크롭("crop_image")도 같이 담습니다."""
+    results = []
+    for region, crop_img in zip(CROP_REGIONS_PCT, crops):
+        name = region["name"]
+        if save_debug_images:
+            crop_img.save(f"debug_crop_{name}.png")
+            _preprocess(_trim_edge_columns(crop_img)).save(f"debug_processed_{name}.png")
+        results.append({"name": name, **_run_ocr(crop_img), "crop_image": crop_img})
+    return results
+
+
 def get_teammate_ocr_results(save_debug_images: bool = False) -> list[dict]:
     """팀원별 OCR 결과(후보 전체 포함)를 CROP_REGIONS_PCT 순서대로 반환합니다.
 
     각 원소: {"name": "teammate_1", "best": "PuniPaw",
               "best_source": "eng@x6", "confidence": 91.0,
               "candidates": ["PuniPaw", ...],  # 점수 높은 순
-              "variants": {...}}
+              "candidate_scores": {"PuniPaw": 101.0, ...},
+              "variants": {...},
+              "crop_image": PIL.Image}  # OCR에 쓴 원본 크롭
 
     save_debug_images=True로 두면 debug_crop_*.png / debug_processed_*.png
     파일을 같이 저장합니다 (좌표/전처리 확인용, 평소엔 필요 없음).
     """
-    # 매번 실행 시점의 실제 게임 창 위치/크기를 기준으로 좌표를 다시 계산
-    # (모니터가 바뀌거나 창이 이동해도 항상 정확한 위치를 계산함)
-    crop_regions = _resolve_crop_regions()
-
-    results = []
-    with mss.mss() as sct:
-        for region in crop_regions:
-            name = region["name"]
-            crop_img = _capture_region(sct, region)
-            if save_debug_images:
-                crop_img.save(f"debug_crop_{name}.png")
-                _preprocess(_trim_edge_columns(crop_img)).save(f"debug_processed_{name}.png")
-
-            ocr_result = _run_ocr(crop_img)
-            results.append({"name": name, **ocr_result})
-
-    return results
+    return ocr_crops(capture_crops(), save_debug_images=save_debug_images)
 
 
 def get_teammate_names() -> list[str]:
@@ -482,27 +509,7 @@ def get_teammate_ocr_results_from_image(
 
     반환 형식은 get_teammate_ocr_results()와 동일합니다.
     """
-    full_img = Image.open(image_path).convert("RGB")
-    crop_regions = _resolve_crop_regions_for_image(full_img.width, full_img.height)
-
-    results = []
-    for region in crop_regions:
-        name = region["name"]
-        box = (
-            region["left"],
-            region["top"],
-            region["left"] + region["width"],
-            region["top"] + region["height"],
-        )
-        crop_img = full_img.crop(box)
-        if save_debug_images:
-            crop_img.save(f"debug_crop_{name}.png")
-            _preprocess(_trim_edge_columns(crop_img)).save(f"debug_processed_{name}.png")
-
-        ocr_result = _run_ocr(crop_img)
-        results.append({"name": name, **ocr_result})
-
-    return results
+    return ocr_crops(crops_from_image(image_path), save_debug_images=save_debug_images)
 
 
 if __name__ == "__main__":
