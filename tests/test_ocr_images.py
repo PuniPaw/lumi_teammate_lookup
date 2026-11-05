@@ -24,6 +24,7 @@ EXPECTED = {
     # 16:10 실게임 화면 (2880x1800을 2000x1250으로 축소한 것)
     "lobby_16x10.webp": ["PuniPaw", "12345a", "얼음마녀"],
     "lobby_16x10_chinese.webp": ["PuniPaw", "藤田皮卡丘", "불법체류자엠마"],
+    "lobby_16x10_portrait.webp": ["PuniPaw", "라비에오", "124qer123"],
 }
 
 API_RESOLVED = {

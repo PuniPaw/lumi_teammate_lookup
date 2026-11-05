@@ -29,8 +29,11 @@ class FakeClock:
 
 def test_slot_ready():
     assert slot_ready(_slot("PuniPaw", 101))
-    assert not slot_ready(_slot("PuniPaw", 60))
+    assert not slot_ready(_slot("sooin", 70))  # 6글자 미만은 75점 기준
     assert not slot_ready(_slot("1", 90))  # 한 글자 잡음
+    assert not slot_ready(_slot("fis", 70))  # 짧은 잡음 (실존 유저와 일치한 적 있음)
+    assert slot_ready(_slot("124qer123", 61))  # 긴 닉네임은 기준이 낮음
+    assert not slot_ready(_slot("124qer123", 55))
     assert not slot_ready(_slot("", 0))
 
 

@@ -13,8 +13,12 @@ from PIL import Image, ImageChops, ImageStat
 # 매칭 완료 후 재시도할 최대 시간(초)과 간격(초)
 OCR_RETRY_TIMEOUT_SECONDS = 15.0
 OCR_RETRY_INTERVAL_SECONDS = 0.5
-# 한 칸이 '읽혔다'고 볼 OCR 점수 (실제 닉네임은 대부분 80~100, 잡음은 70 미만)
+# 한 칸이 '읽혔다'고 볼 OCR 점수 (실제 닉네임은 대부분 80~100, 잡음은 70 미만).
+# 읽힌 칸만 API로 조회함. 긴 닉네임은 우연히 다른 유저와 일치할 가능성이 낮아
+# 기준을 낮춤 (오매칭이 있었던 잡음은 모두 짧았음: 'fis', '和一', '1BS')
 SLOT_READY_SCORE = 75
+LONG_NICKNAME_LENGTH = 6
+LONG_NICKNAME_READY_SCORE = 60
 MIN_NICKNAME_LENGTH = 2
 
 # 기준 이미지와 닉네임 칸 '배경'의 차이가 이 값을 넘으면 칸이 사라진 것으로 봄
@@ -28,7 +32,11 @@ def slot_ready(result: dict, ready_score: float = SLOT_READY_SCORE) -> bool:
     """OCR 결과 한 칸이 닉네임을 확실히 읽은 상태인지."""
     best = result.get("best") or ""
     score = (result.get("candidate_scores") or {}).get(best, result.get("confidence", 0))
-    return len(best) >= MIN_NICKNAME_LENGTH and score >= ready_score
+    if len(best) < MIN_NICKNAME_LENGTH:
+        return False
+    if len(best) >= LONG_NICKNAME_LENGTH:
+        ready_score = min(ready_score, LONG_NICKNAME_READY_SCORE)
+    return score >= ready_score
 
 
 def wait_for_teammates(

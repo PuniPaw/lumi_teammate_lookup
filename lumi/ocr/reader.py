@@ -16,7 +16,8 @@ from lumi.ocr.candidates import empty_result, rank_candidates
 from lumi.ocr.chars import OCR_LANGS
 
 # (확대 배율, 전처리). 글자마다 잘 읽히는 배율이 달라 여러 개를 씀
-OCR_PASSES = [(3, "soft"), (6, "soft"), (6, "binary")]
+# (2배는 이 폰트의 숫자 '2'를 'le'로 쪼개 읽는 문제('124qer123')에 효과가 있었음)
+OCR_PASSES = [(2, "soft"), (3, "soft"), (6, "soft"), (6, "binary")]
 # 위 배율의 기준 칸 높이(px): 1920x1080의 칸 14px + 미세 보정 여유 위아래 1px.
 # 칸이 더 크면(고해상도) 같은 글자 크기가 되도록 배율을 줄임.
 OCR_REFERENCE_CROP_HEIGHT = 16
