@@ -4,3 +4,8 @@ __pycache__/
 .env
 .pytest_cache/
 /debug/
+
+# Cloudflare Worker (proxy/)
+proxy/.dev.vars
+proxy/.wrangler/
+node_modules/
