@@ -45,6 +45,7 @@ def test_match_shows_modal_then_closes_when_game_starts(tmp_path, monkeypatch):
     log_path = tmp_path / "Player.log"
     log_path.write_text("boot\n", encoding="utf-8")
     monkeypatch.setattr(log_watcher, "LOG_PATH", str(log_path))
+    monkeypatch.setattr(live_overlay.debug_store, "DEBUG_DIR", str(tmp_path / "debug"))
 
     # 화면: 처음 두 번은 아직 닉네임이 없는 화면, 그다음부터 매칭 로비
     ocr_frames = iter(["team_lobby.png", "team_lobby.png"])

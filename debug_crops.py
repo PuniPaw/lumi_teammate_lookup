@@ -1,8 +1,8 @@
 """
-게임 화면 캡처(스크린샷 또는 debug/match*_end.png)에서 팀원 닉네임 칸만
+게임 화면 캡처(스크린샷 또는 debug/*_screen.png)에서 팀원 닉네임 칸만
 원본 해상도로 잘라 저장하고, OCR 결과를 출력하는 디버그 도구.
 
-사용법: python debug_crops.py debug/match1_end.png
+사용법: python debug_crops.py debug/20261105-101434_screen.png
 결과:  debug/crops/<파일이름>_teammate_1.png ... (원본 크기)
        debug/crops/<파일이름>_teammate_1_x4.png ... (눈으로 보기 쉽게 4배 확대)
 
@@ -28,7 +28,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     stem = os.path.splitext(os.path.basename(image_path))[0]
 
-    # debug/match*.png에는 빨간 박스가 영역 바깥에 그려져 있어서, 미세 보정
+    # debug/*_screen.png에는 빨간 박스가 영역 바깥에 그려져 있어서, 미세 보정
     # (위아래로 넓게 캡처) 없이 정확히 계산된 위치만 자릅니다.
     crops = crops_from_image(image_path, refine=False)
     for region, crop in zip(NAME_REGIONS_REF, crops):
