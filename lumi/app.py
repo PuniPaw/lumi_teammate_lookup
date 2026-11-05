@@ -187,6 +187,10 @@ class OverlayController(QObject):
         if self.window is None or not self.window.isVisible():  # 닫기 버튼으로 닫음
             self.close_overlay()
             return
+        # 화면을 보이는 그대로 캡처하므로, alt+tab 등으로 게임 창이 가려지면 다른 창을 보고
+        # '닉네임 칸이 사라짐'(게임 시작)으로 판단해 닫아 버림. 가려진 동안은 판단을 멈춤
+        if not self.screen.is_active():
+            return
         try:
             current = self.screen.name_crops(refine=False)
         except Exception:

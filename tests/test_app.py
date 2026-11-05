@@ -157,6 +157,27 @@ def test_hidden_game_window_is_not_read(tmp_path, monkeypatch):
     assert stats.seen == []
 
 
+def test_modal_stays_open_while_game_window_is_hidden(tmp_path):
+    """alt+tab으로 다른 창이 앞에 오면 그 창을 캡처하게 되므로 게임 시작으로 보지 않음"""
+    app = QApplication.instance() or QApplication([])
+    screen = ToggleScreen(fixture("test3.png"), active=True)
+    controller = OverlayController(screen, FakeStats(), DebugStore(enabled=False, directory=str(tmp_path)))
+    controller.timer.setInterval(50)
+    controller.on_team_ready([failed_stats("PuniPaw")], screen.name_crops(refine=False))
+
+    # 가려진 동안 캡처되는 화면은 로비가 아님 -> 그래도 닫히지 않아야 함
+    screen.active, screen.path = False, fixture("main.png")
+    assert not _wait_until(app, lambda: controller.window is None, timeout=1), "가려진 동안 모달이 닫힘"
+
+    # 게임 창으로 돌아왔는데 로비면 계속 떠 있음
+    screen.active, screen.path = True, fixture("test3.png")
+    assert not _wait_until(app, lambda: controller.window is None, timeout=0.5)
+
+    # 실제로 게임이 시작되면 닫힘
+    screen.path = fixture("main.png")
+    assert _wait_until(app, lambda: controller.window is None, timeout=5), "모달이 닫히지 않음"
+
+
 def test_only_confident_slots_are_looked_up():
     from lumi.app import lookup_targets
 
