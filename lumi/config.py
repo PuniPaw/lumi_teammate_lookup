@@ -9,6 +9,7 @@
 | LUMI_GAME_WINDOW_TITLE   | 게임 창 제목 (부분 일치)   | Eternal Return |
 | LUMI_LOG_PATH            | 게임 로그 경로             | %USERPROFILE%\\AppData\\LocalLow\\NimbleNeuron\\Eternal Return\\Player.log |
 | LUMI_TESSERACT_CMD       | tesseract 실행 파일        | Windows 기본 설치 경로에 있으면 그것, 없으면 PATH |
+| LUMI_OCR_ENGINE          | 닉네임 OCR 엔진            | paddle (rapidocr가 없으면 tesseract). tesseract로 바꿀 수 있음 |
 
 알고리즘 상수(OCR 임계값 등)는 근거와 함께 각 모듈에 있습니다 (docs/DEVELOPMENT_NOTES.md).
 """
@@ -32,6 +33,7 @@ class Settings:
     game_window_title: str = "Eternal Return"
     log_path: str = os.path.expandvars(_DEFAULT_LOG_PATH)
     tesseract_cmd: Optional[str] = None  # None이면 PATH의 tesseract
+    ocr_engine: str = "paddle"  # paddle 또는 tesseract (lumi.ocr.make_reader)
     debug_dir: str = os.path.join(PROJECT_ROOT, "debug")
 
 
@@ -52,4 +54,5 @@ def load_settings() -> Settings:
         game_window_title=env.get("LUMI_GAME_WINDOW_TITLE") or default.game_window_title,
         log_path=os.path.expandvars(env.get("LUMI_LOG_PATH") or _DEFAULT_LOG_PATH),
         tesseract_cmd=tesseract,
+        ocr_engine=(env.get("LUMI_OCR_ENGINE") or default.ocr_engine).strip().lower(),
     )

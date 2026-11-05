@@ -18,7 +18,7 @@ def is_latin(ch: str) -> bool:
 
 
 SEPARATORS = set("|丨_-")  # 닉네임 안의 구분자 ('静戒丨BS')
-LINE_LIKE_CHARS = set("一丨|-_ー—")  # UI의 선을 글자로 읽은 결과에 자주 나옴
+LINE_LIKE_CHARS = set("一丨|-_ー—−")  # UI의 선을 글자로 읽은 결과에 자주 나옴 ('−'는 PP-OCR)
 
 OCR_LANGS = ["eng", "kor", "jpn", "chi_sim", "chi_tra"]
 CJK_LANGS = ["jpn", "chi_sim", "chi_tra"]

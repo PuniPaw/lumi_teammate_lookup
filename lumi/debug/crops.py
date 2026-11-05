@@ -12,7 +12,7 @@ from PIL import Image
 
 from lumi.capture.screen import NAME_REGIONS_REF, ImageScreen
 from lumi.config import load_settings
-from lumi.ocr.reader import TesseractReader
+from lumi.ocr import make_reader
 
 
 def main() -> None:
@@ -35,7 +35,7 @@ def main() -> None:
         print(f"저장: {base}.png ({crop.width}x{crop.height})")
 
     print("\nOCR 결과:")
-    for r in TesseractReader(settings.tesseract_cmd).read(crops):
+    for r in make_reader(settings).read(crops):
         print(f"  {r['name']}: {r['best']!r} (점수 {r['confidence']})  후보: {r['candidates'][:6]}")
 
 

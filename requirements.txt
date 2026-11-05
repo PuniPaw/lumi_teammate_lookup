@@ -7,3 +7,5 @@ Pillow>=12.0.0
 bserpy>=0.1.0
 python-dotenv>=1.0.0
 psutil>=6.0.0
+rapidocr>=3.10.0
+onnxruntime>=1.31.0
