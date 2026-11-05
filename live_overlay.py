@@ -23,6 +23,7 @@ import queue
 import signal
 import sys
 import threading
+import time
 import traceback
 from typing import Optional
 
@@ -45,6 +46,10 @@ from teammate_ocr import capture_crops, capture_window_snapshot, get_teammate_oc
 
 load_dotenv()
 API_KEY = os.getenv("ETERNAL_RETURN_API_KEY")
+
+# 매칭 완료 로그는 한 번에 여러 줄(MatchingComplete, MatchingPadding, Matched)
+# 찍히므로, 이 시간(초) 안에 다시 들어온 신호는 같은 매칭으로 봅니다.
+MATCH_DEBOUNCE_SECONDS = 5.0
 
 # 게임 시작 여부를 확인하는 간격(ms)
 PRESENCE_CHECK_INTERVAL_MS = 1000
@@ -116,8 +121,13 @@ class MatchWorker(QObject):
     # -- 로그 감시 스레드 ------------------------------------------------------
     def _watch_log(self):
         print(f"로그 감시 시작: {log_watcher.LOG_PATH}")
+        last_match_at = float("-inf")
         for line in log_watcher.follow(log_watcher.LOG_PATH):
             if log_watcher.is_match_complete(line):
+                now = time.monotonic()
+                if now - last_match_at < MATCH_DEBOUNCE_SECONDS:
+                    continue  # 같은 매칭의 다른 로그 줄
+                last_match_at = now
                 with self._lock:
                     self._match_id += 1
                     match_id = self._match_id

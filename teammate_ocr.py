@@ -178,6 +178,20 @@ OCR_LANGS = ["eng", "kor", "jpn", "chi_sim", "chi_tra"]
 # (예: 'ya발견'의 한글은 3배에서, 영문은 6배에서 잘 읽힘) 여러 개를 씁니다.
 OCR_PASSES = [(3, "soft"), (6, "soft"), (6, "binary")]
 
+# 1단계(빠른 OCR): 이 패스/언어팩만 먼저 돌려서 점수가 FAST_ACCEPT_SCORE
+# 이상이면 바로 확정합니다. (Windows는 Tesseract 실행 1회 비용이 커서,
+# 전체 15회를 매번 돌리면 한 칸에 수 초가 걸림)
+FAST_PASS = (3, "soft")
+FAST_LANGS = ["eng", "kor", "jpn"]
+FAST_ACCEPT_SCORE = 90
+
+# 크롭에서 '배경보다 확실히 밝은 픽셀(글자)'의 비율이 이보다 작으면 빈 칸으로
+# 보고 OCR을 건너뜁니다. (저장된 스크린샷 기준: 닉네임 칸 0.10~0.33, 빈 칸 0~0.03)
+MIN_TEXT_PIXEL_RATIO = 0.05
+
+# 가로선/세로선 같은 UI 요소를 글자로 잘못 읽은 결과에 자주 나오는 문자
+_LINE_LIKE_CHARS = set("一丨|-_ー—")
+
 # 전처리 시 상하좌우에 붙이는 흰 여백(px). 좌표 환산에 사용.
 _PAD = 30
 
@@ -381,6 +395,35 @@ def _build_candidates(words: list[dict], text_width: float) -> list[tuple[str, f
     return candidates
 
 
+def _text_pixel_ratio(img: Image.Image) -> float:
+    """배경(중앙값)보다 80 이상 밝은 픽셀의 비율 = 흰 글씨가 차지하는 비율."""
+    gray = img.convert("L")
+    hist = gray.histogram()
+    total = sum(hist)
+    if total == 0:
+        return 0.0
+    acc, median = 0, 0
+    for value, count in enumerate(hist):
+        acc += count
+        if acc * 2 >= total:
+            median = value
+            break
+    return sum(hist[median + 81:]) / total
+
+
+def _is_junk(text: str) -> bool:
+    """UI의 선/테두리를 글자로 읽은 듯한 후보인지.
+
+    예: '一一一一' (가로선), '||'. 실제로 이런 닉네임의 유저가 존재해서
+    엉뚱한 사람의 전적이 뜬 적이 있어서 후보에서 아예 뺍니다.
+    """
+    if not text:
+        return True
+    if len(text) >= 2 and len(set(text)) == 1:
+        return True
+    return all(ch in _LINE_LIKE_CHARS for ch in text)
+
+
 def _dedupe_consecutive(s: str) -> str:
     """연속으로 겹치는 글자를 하나로 줄입니다 ('yaa' -> 'ya').
 
@@ -414,16 +457,41 @@ def _run_ocr(crop: Image.Image) -> dict:
            "variants": {출처: 후보}  # 하위 호환용, 점수 높은 순}
     """
     crop = _trim_edge_columns(crop)
-    jobs = []
-    images = {p: _preprocess(crop, *p) for p in OCR_PASSES}
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for p, img in images.items():
-            for lang in OCR_LANGS:
-                jobs.append((p, pool.submit(_ocr_words, img, lang, p[0])))
-        words_by_pass: dict = {p: [] for p in OCR_PASSES}
-        for p, fut in jobs:
-            words_by_pass[p].extend(fut.result())
+    if _text_pixel_ratio(crop) < MIN_TEXT_PIXEL_RATIO:
+        return _empty_result()  # 빈 칸 (아직 닉네임이 안 그려졌거나 다른 화면)
 
+    images = {p: _preprocess(crop, *p) for p in OCR_PASSES}
+
+    def run(jobs_spec):
+        words_by_pass: dict = {}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [(p, pool.submit(_ocr_words, images[p], lang, p[0])) for p, lang in jobs_spec]
+            for p, fut in futures:
+                words_by_pass.setdefault(p, []).extend(fut.result())
+        return words_by_pass
+
+    # 1단계: 빠른 OCR로 충분히 확실하면 바로 확정
+    fast_spec = [(FAST_PASS, lang) for lang in FAST_LANGS]
+    fast_words = run(fast_spec)
+    fast = _rank_candidates(fast_words)
+    if fast["best"] and fast["candidate_scores"][fast["best"]] >= FAST_ACCEPT_SCORE:
+        return fast
+
+    # 2단계: 나머지 패스/언어팩까지 전부
+    rest_spec = [(p, lang) for p in OCR_PASSES for lang in OCR_LANGS if (p, lang) not in fast_spec]
+    words_by_pass = run(rest_spec)
+    for p, words in fast_words.items():
+        words_by_pass.setdefault(p, []).extend(words)
+    return _rank_candidates(words_by_pass)
+
+
+def _empty_result() -> dict:
+    return {"best": "", "best_source": "", "confidence": 0.0,
+            "candidates": [], "candidate_scores": {}, "variants": {}}
+
+
+def _rank_candidates(words_by_pass: dict) -> dict:
+    """패스별 단어 목록으로 후보를 만들고 점수순으로 정렬한 결과를 반환합니다."""
     # 같은 후보가 여러 패스/언어에서 나오면 최고 점수 + 일치 보너스
     scores: dict[str, float] = {}
     sources: dict[str, str] = {}
@@ -432,6 +500,8 @@ def _run_ocr(crop: Image.Image) -> dict:
         # 글자 영역 폭: 어떤 언어팩이든 '무언가'를 읽어낸 영역 전체
         text_width = _span([w for w in words if w["conf"] >= MIN_WORD_CONF]) or _span(words)
         for text, score, src in _build_candidates(words, text_width):
+            if _is_junk(text):
+                continue
             hits[text] = hits.get(text, 0) + 1
             if score > scores.get(text, -1):
                 scores[text] = score
@@ -442,14 +512,13 @@ def _run_ocr(crop: Image.Image) -> dict:
     # 보조 후보: 중복 글자 축소 / 구분자 치환 (원래 후보보다 낮은 점수)
     for text in list(scores):
         for alt in [_dedupe_consecutive(text), *_separator_alternatives(text)]:
-            if alt and alt not in scores:
+            if alt and alt not in scores and not _is_junk(alt):
                 scores[alt] = scores[text] - 10
                 sources[alt] = sources[text] + "+alt"
 
     ranked = sorted(scores, key=lambda t: scores[t], reverse=True)
     if not ranked:
-        return {"best": "", "best_source": "", "confidence": 0.0,
-                "candidates": [], "candidate_scores": {}, "variants": {}}
+        return _empty_result()
 
     best = ranked[0]
     return {

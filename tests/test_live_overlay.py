@@ -85,9 +85,12 @@ def test_match_shows_modal_then_closes_when_game_starts(tmp_path, monkeypatch):
     time.sleep(0.5)  # follow()가 파일 끝으로 이동할 시간
 
     with open(log_path, "a", encoding="utf-8") as f:
-        f.write("[Matching] MatchingComplete\n")
+        # 실제 로그처럼 매칭 완료 신호가 연달아 두 줄 찍힘 -> 한 번만 처리돼야 함
+        f.write("[OnReceiveMatchingUpdate] MatchingComplete, matchPadding.userCount : 16\n")
+        f.write("[OnReceiveMatchingUpdate] matchingNotification : MatchingPadding, Matched\n")
 
     assert _wait_until(app, lambda: controller.window is not None), "모달이 뜨지 않음"
+    assert worker._current_match_id() == 1  # 두 줄이 한 매칭으로 처리됨
     assert seen["names"] == ["PuniPaw", "로즈만때리는루크", "마브하라"]
     assert controller.window.isVisible()
 
