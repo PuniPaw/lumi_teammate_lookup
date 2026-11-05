@@ -64,6 +64,20 @@ PRESENCE_CHECK_INTERVAL_MS = 1000
 DEBUG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
 
 
+def save_debug_crops(match_id: int, results: list[dict]):
+    """OCR에 쓴 닉네임 칸 이미지를 원본 크기로 저장합니다 (인식 개선용 자료)."""
+    if not DEBUG_DIR or not results:
+        return
+    try:
+        os.makedirs(DEBUG_DIR, exist_ok=True)
+        for r in results:
+            crop = r.get("crop_image")
+            if crop is not None:
+                crop.save(os.path.join(DEBUG_DIR, f"match{match_id}_{r['name']}.png"))
+    except Exception as e:
+        print(f"  [디버그] 닉네임 칸 저장 실패: {e}")
+
+
 def save_debug_snapshot(match_id: int, label: str):
     """게임 창 전체 캡처를 debug/ 폴더에 저장하고 창 정보를 출력합니다."""
     if not DEBUG_DIR:
@@ -179,6 +193,7 @@ class MatchWorker(QObject):
         if superseded():
             return
         save_debug_snapshot(match_id, "end")
+        save_debug_crops(match_id, results)
         if not results or ready == 0:
             print("  ❌ 닉네임을 인식하지 못했습니다. (모달 표시 안 함)")
             print(f"     {DEBUG_DIR} 폴더의 캡처 이미지에서 빨간 박스가 닉네임 위치에 있는지 확인하세요.")
