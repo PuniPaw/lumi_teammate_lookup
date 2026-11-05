@@ -113,3 +113,55 @@ def test_overlay_is_placed_inside_screen():
     assert screen.contains(geo.topLeft()) and screen.contains(geo.topRight())
     assert geo.right() >= screen.right() - 100
     window.close()
+
+
+class FixedReader:
+    """정해진 OCR 결과를 돌려주고 호출 횟수를 셈."""
+
+    def __init__(self, results):
+        self.results = results
+        self.calls = 0
+
+    def read(self, crops):
+        self.calls += 1
+        return self.results
+
+
+class ToggleScreen(ImageScreen):
+    def __init__(self, path, active):
+        super().__init__(path)
+        self.active = active
+
+    def is_active(self):
+        return self.active
+
+
+def _slot(name, best, score):
+    return {"name": name, "best": best, "confidence": score,
+            "candidates": [best] if best else [], "candidate_scores": {best: score} if best else {},
+            "crop_image": None}
+
+
+def test_hidden_game_window_is_not_read(tmp_path, monkeypatch):
+    """게임 창이 가려져 있으면 OCR 하지 않고, 결과 없이 끝남 (다른 창 글자 오매칭 방지)"""
+    import lumi.app
+
+    monkeypatch.setattr(lumi.app, "wait_for_teammates",
+                        lambda read, should_stop: (lambda r: (r or None, 0))(read()))
+    reader = FixedReader([_slot("teammate_1", "fis", 79.0)])
+    stats = FakeStats()
+    worker = MatchWorker(FakeSignals(), ToggleScreen(fixture("test3.png"), active=False), reader, stats,
+                         DebugStore(enabled=False, directory=str(tmp_path)))
+    worker._handle_match(0)
+    assert reader.calls == 0
+    assert stats.seen == []
+
+
+def test_only_confident_slots_are_looked_up():
+    from lumi.app import lookup_targets
+
+    results = [_slot("teammate_1", "PuniPaw", 95.0), _slot("teammate_2", "和一", 60.0), _slot("teammate_3", "", 0.0)]
+    targets = lookup_targets(results)
+    assert targets[0]["candidates"] == ["PuniPaw"]
+    assert targets[1]["candidates"] == [] and targets[1]["best"] == "和一"  # 조회 안 함, 카드에는 표시
+    assert targets[2]["candidates"] == []

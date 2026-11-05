@@ -31,6 +31,15 @@ from lumi.ui.overlay import OverlayWindow
 PRESENCE_CHECK_INTERVAL_MS = 1000
 
 
+def lookup_targets(results: list[dict]) -> list[dict]:
+    """확실히 읽힌 칸만 API로 조회하도록, 나머지 칸은 후보를 비웁니다.
+
+    덜 읽힌 칸의 글자('和一', 'fis' 등 잡음)가 우연히 실존 유저와 일치해 엉뚱한 전적이
+    뜬 적이 있음. 비운 칸은 읽은 글자 그대로 '조회 실패' 카드가 되어 모달에서 고칠 수 있음.
+    """
+    return [r if slot_ready(r) else {**r, "candidates": [], "candidate_scores": {}} for r in results]
+
+
 class MatchWorker(QObject):
     """백그라운드 스레드에서 매칭 신호 대기 / OCR / 전적 조회."""
 
@@ -87,15 +96,19 @@ class MatchWorker(QObject):
             return match_id != self.current_match_id()
 
         print("  닉네임 인식 중...")
-        warned_hidden = False
+        hidden_seen = False
         attempt = 0
 
         def read() -> list[dict]:
-            nonlocal attempt, warned_hidden
+            nonlocal attempt, hidden_seen
             attempt += 1
-            if not warned_hidden and not self.screen.is_active():
-                warned_hidden = True
-                print("  ⚠️ 게임 창이 다른 창에 가려져 있습니다. 게임 창을 맨 앞에 두세요.")
+            # 화면을 보이는 그대로 캡처하므로, 게임 창이 가려져 있으면 다른 창을 읽게 됨.
+            # 그 결과가 우연히 실존 유저와 일치할 수 있어 아예 읽지 않고 기다림
+            if not self.screen.is_active():
+                if not hidden_seen:
+                    print("  ⚠️ 게임 창이 다른 창에 가려져 있습니다. 게임 창을 맨 앞에 두세요.")
+                hidden_seen = True
+                return []
             results = self.reader.read(self.screen.name_crops())
             if self.debug.enabled:
                 print(f"  시도 {attempt}: " + ", ".join(f"{r['best']!r}({r['confidence']})" for r in results))
@@ -112,12 +125,13 @@ class MatchWorker(QObject):
         self.debug.cleanup()
 
         if not results or ready == 0:
-            print("  ❌ 닉네임을 인식하지 못했습니다.")
+            hint = " (게임 창이 가려져 있었음)" if hidden_seen else ""
+            print(f"  ❌ 닉네임을 인식하지 못했습니다.{hint}")
             return
         for r in results:
             print(f"  {'✅' if slot_ready(r) else '⚠️'} {r['name']}: {r['best']!r} (점수 {r['confidence']})")
 
-        team_stats = self.stats.team_stats(results)
+        team_stats = self.stats.team_stats(lookup_targets(results))
         if ready == len(results) and any(not s.get("user_id") for s in team_stats):
             self.debug.save_screen(prefix, self.screen.snapshot)  # 읽었지만 확정 못 한 팀원
         if superseded() or not team_stats:
