@@ -3,8 +3,12 @@
 import threading
 import time
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+from bserpy._errors import RateLimitError
 
 from lumi.api import player_stats
+from lumi.api.recent_stats import format_recent_stats
 
 
 def test_tier_name():
@@ -53,6 +57,21 @@ def test_fetch_user_stats_without_rank():
     stats = player_stats.fetch_user_stats(SimpleNamespace(users=FakeUsers(rank_error=True)), "PuniPaw", 31, {})
     assert (stats["tier"], stats["mmr"]) == ("언랭크", 0)
     assert stats["user_id"] == "uid-1"
+
+
+def test_failed_recent_lookup_is_not_shown_as_no_record():
+    users = FakeUsers()
+    users._t = SimpleNamespace(get=Mock(side_effect=RateLimitError("Too Many Requests")))
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
+    assert format_recent_stats(stats) == "최근 게임 조회 실패"
+    assert stats["tier"] == "다이아몬드 II"
+
+
+def test_player_without_recent_games_is_shown_as_no_record():
+    users = FakeUsers()
+    users._t = SimpleNamespace(get=lambda path, **kw: {"userGames": []})
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
+    assert format_recent_stats(stats) == "최근 게임 기록 없음"
 
 
 class FakeClient:

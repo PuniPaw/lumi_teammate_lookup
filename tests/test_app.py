@@ -19,7 +19,7 @@ from lumi.app import MatchWorker, OverlayController, connect  # noqa: E402
 from lumi.capture.screen import ImageScreen  # noqa: E402
 from lumi.debug.store import DebugStore  # noqa: E402
 from lumi.ocr.paddle import PaddleReader  # noqa: E402
-from lumi.ui.overlay import OverlayWindow  # noqa: E402
+from lumi.ui.overlay import OverlayWindow, TeammateRow  # noqa: E402
 
 
 class FakeSignals:
@@ -114,6 +114,14 @@ def test_overlay_is_placed_inside_screen():
     assert screen.contains(geo.topLeft()) and screen.contains(geo.topRight())
     assert geo.right() >= screen.right() - 100
     window.close()
+
+
+def test_modal_shows_failed_recent_lookup():
+    QApplication.instance() or QApplication([])
+    stats = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="다이아몬드 IV", recent_games=None)
+    row = TeammateRow(stats, refetch=lambda n: None)
+    assert row.recent_line.text() == "최근 게임 조회 실패"
+    assert not row.recent_line.isHidden()
 
 
 class FixedReader:

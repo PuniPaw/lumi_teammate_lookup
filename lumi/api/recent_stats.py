@@ -63,7 +63,9 @@ def empty_recent_stats() -> dict:
 
 def format_recent_stats(stats: dict) -> str:
     """예: '최근 20게임  ·  평균 딜량 12,345  ·  평균 TK 6.2'"""
-    n = stats.get("recent_games") or 0
+    n = stats["recent_games"]
+    if n is None:
+        return "최근 게임 조회 실패"
     if n == 0:
         return "최근 게임 기록 없음"
     parts = [f"최근 {n}게임"]

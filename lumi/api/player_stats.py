@@ -99,6 +99,7 @@ def fetch_user_stats(
     try:
         stats.update(get_recent_stats(client, user_id, count=RECENT_GAME_COUNT))
     except Exception as e:
+        stats["recent_games"] = None  # 0은 '기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 최근 게임 조회 실패 ({e!r})")
 
     print(
