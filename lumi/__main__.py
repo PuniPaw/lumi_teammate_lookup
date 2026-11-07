@@ -4,12 +4,17 @@
 자기 자신(exe)을 --app 으로 다시 실행합니다 (lumi.game.process.app_command).
 """
 
+import os
 import sys
 
-from lumi.config import load_settings
+from lumi.config import DATA_DIR, FROZEN, load_settings
+from lumi.logfile import setup_log
 
 if __name__ == "__main__":
-    if "--app" in sys.argv[1:]:
+    is_app = "--app" in sys.argv[1:]
+    if FROZEN:
+        setup_log(os.path.join(DATA_DIR, "logs"), "app" if is_app else "watch")
+    if is_app:
         from lumi.app import main
 
         main()

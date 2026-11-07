@@ -9,3 +9,5 @@ __pycache__/
 proxy/.dev.vars
 proxy/.wrangler/
 node_modules/
+build/
+dist/
