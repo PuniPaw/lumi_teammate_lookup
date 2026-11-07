@@ -124,6 +124,13 @@ def test_modal_shows_failed_recent_lookup():
     assert not row.recent_line.isHidden()
 
 
+def test_modal_shows_failed_season_lookup():
+    QApplication.instance() or QApplication([])
+    stats = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="다이아몬드 IV", games=None)
+    row = TeammateRow(stats, refetch=lambda n: None)
+    assert row.detail_line.text() == "시즌 통계 조회 실패"
+
+
 class FixedReader:
     """정해진 OCR 결과를 돌려주고 호출 횟수를 셈."""
 

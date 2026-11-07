@@ -57,14 +57,12 @@ class TeammateRow(QFrame):
         label.setStyleSheet(style)
         return label
 
-    def _apply_stats(self, stats: dict) -> None:
-        tier = f"🏆 {stats['tier']}"
-        if stats.get("mmr", 0) > 0:
-            tier += f" (MMR: {stats['mmr']})"
-        self.tier_line.setText(tier)
-
+    @staticmethod
+    def _season_text(stats: dict) -> str:
+        if stats["games"] is None:
+            return "시즌 통계 조회 실패"
         line1 = f"모스트 {stats['top_character']} {stats['top_character_games']}판"
-        if stats.get("games", 0) > 0:
+        if stats["games"] > 0:
             line1 += f"  ·  전체 {stats['games']}판"
         if stats.get("average_rank", 0) > 0:
             line1 += f"  ·  평균 {stats['average_rank']:.2f}등"
@@ -73,7 +71,15 @@ class TeammateRow(QFrame):
             for key, label in (("top1", "승률"), ("top2", "2위"), ("top3", "3위"))
             if stats.get(key, 0) > 0
         ]
-        self.detail_line.setText(line1 + ("\n" + "  ·  ".join(rates) if rates else ""))
+        return line1 + ("\n" + "  ·  ".join(rates) if rates else "")
+
+    def _apply_stats(self, stats: dict) -> None:
+        tier = f"🏆 {stats['tier']}"
+        if stats.get("mmr", 0) > 0:
+            tier += f" (MMR: {stats['mmr']})"
+        self.tier_line.setText(tier)
+
+        self.detail_line.setText(self._season_text(stats))
 
         # 유저 조회 자체가 실패한 카드에 '기록 없음'을 띄우면 오해를 주므로 숨김
         self.recent_line.setVisible(bool(stats.get("user_id")))

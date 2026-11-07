@@ -8,11 +8,15 @@
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+from bserpy import AuthenticationError, RateLimitError, ServerError, TransportError
 from bserpy.utils import SeasonHelper
 
 from lumi.api.client import ClientFactory
 from lumi.api.recent_stats import RECENT_GAME_COUNT, empty_recent_stats, format_recent_stats, get_recent_stats
 from lumi.api.resolve import resolve_teammate_names
+
+FAILED_TIER = "조회 실패"
+_API_FAILURES = (AuthenticationError, RateLimitError, ServerError, TransportError)
 
 # (최소 MMR, 티어 이름). 위에서부터 처음 만족하는 티어.
 TIERS = [
@@ -39,7 +43,7 @@ def failed_stats(nickname: str) -> dict:
     """조회에 실패한 팀원의 전적 dict (모달에 '조회 실패'로 표시됨)."""
     return {
         "nickname": nickname,
-        "tier": "조회 실패",
+        "tier": FAILED_TIER,
         "top_character": "?",
         "top_character_games": 0,
         "mmr": 0,
@@ -74,8 +78,11 @@ def fetch_user_stats(
     try:
         mmr = client.users.get_rank(user_id, season_id=season_id).mmr
         stats.update(mmr=mmr, tier=tier_name(mmr))
+    except _API_FAILURES as e:
+        stats["tier"] = FAILED_TIER
+        print(f"  {nickname}: 랭크 조회 실패 ({e!r})")
     except Exception as e:  # 랭크 기록이 없으면 라이브러리가 KeyError 등을 냄
-        print(f"  {nickname}: 랭크 조회 실패 ({e!r}) -> 언랭크")
+        print(f"  {nickname}: 랭크 기록 없음 ({e!r}) -> 언랭크")
 
     try:
         season = next(iter(client.users.get_stats(user_id, season_id=season_id)), None)
@@ -94,6 +101,7 @@ def fetch_user_stats(
                     top_character_games=most.total_games,
                 )
     except Exception as e:
+        stats["games"] = None  # 0은 '시즌 기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 시즌 통계 조회 실패 ({e!r})")
 
     try:

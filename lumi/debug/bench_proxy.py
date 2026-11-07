@@ -28,7 +28,6 @@ TEAMS = [
     ("HYUHAN", "MirNight", "로즈만때리는루크"),
     ("마브하라", "레몬데몬", "얼음마녀"),
 ]
-FAILED_TIER = "조회 실패"
 
 
 def _ocr(names) -> list[dict]:
@@ -64,7 +63,7 @@ def measure(api_url: str, names, label: str) -> dict:
         "label": label,
         "seconds": round(time.monotonic() - started, 2),
         "names": list(names),
-        "ok": sum(1 for s in team if s["tier"] != FAILED_TIER),
+        "ok": sum(1 for s in team if s["tier"] != player_stats.FAILED_TIER),
         "total": len(names),
         "statuses": {str(k): v for k, v in statuses.items()},
         "caches": dict(caches),

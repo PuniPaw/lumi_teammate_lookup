@@ -59,6 +59,29 @@ def test_fetch_user_stats_without_rank():
     assert stats["user_id"] == "uid-1"
 
 
+def test_failed_rank_lookup_is_not_shown_as_unranked():
+    users = FakeUsers()
+    users.get_rank = Mock(side_effect=RateLimitError("Too Many Requests"))
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
+    assert (stats["tier"], stats["mmr"]) == ("조회 실패", 0)
+    assert stats["games"] == 120  # 다른 조회는 그대로 보여줌
+
+
+def test_failed_season_lookup_is_marked():
+    users = FakeUsers()
+    users.get_stats = Mock(side_effect=RateLimitError("Too Many Requests"))
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
+    assert stats["games"] is None
+    assert stats["tier"] == "다이아몬드 II"
+
+
+def test_player_without_season_record_is_not_marked_failed():
+    users = FakeUsers()
+    users.get_stats = lambda user_id, season_id: []
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
+    assert stats["games"] == 0
+
+
 def test_failed_recent_lookup_is_not_shown_as_no_record():
     users = FakeUsers()
     users._t = SimpleNamespace(get=Mock(side_effect=RateLimitError("Too Many Requests")))
