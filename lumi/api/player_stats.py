@@ -5,6 +5,7 @@
 '조회 실패' dict를 만들어, 모달에서 닉네임을 고쳐 재조회할 수 있게 합니다.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from bserpy.utils import SeasonHelper
@@ -58,9 +59,15 @@ def current_season_id(client) -> Optional[int]:
     return season["seasonID"] if season else None
 
 
-def fetch_user_stats(client, nickname: str, season_id: int, character_names: dict[int, str]) -> dict:
-    """닉네임 한 명의 전적 dict. 유저가 없으면 예외, 세부 조회 실패는 기본값으로 채움."""
-    user_id = client.users.get_uid(nickname).user_id
+def fetch_user_stats(
+    client, nickname: str, season_id: int, character_names: dict[int, str], user_id: Optional[str] = None
+) -> dict:
+    """닉네임 한 명의 전적 dict. 유저가 없으면 예외, 세부 조회 실패는 기본값으로 채움.
+
+    user_id: 닉네임을 확정할 때 이미 얻었으면 넘겨서 같은 조회를 또 하지 않음.
+    """
+    if user_id is None:
+        user_id = client.users.get_uid(nickname).user_id
     stats = failed_stats(nickname)
     stats.update(user_id=str(user_id), season_id=season_id, tier="언랭크")
 
@@ -126,22 +133,32 @@ class EternalReturnStats:
         print(f"✅ 캐릭터 이름 {len(self.character_names)}개 로드 완료")
 
     def team_stats(self, ocr_results: list[dict]) -> list[dict]:
-        """확정하지 못한 칸도 OCR이 읽은 글자로 '조회 실패' 카드를 만듭니다."""
+        """확정하지 못한 칸도 OCR이 읽은 글자로 '조회 실패' 카드를 만듭니다.
+
+        팀원을 동시에 조회합니다. 프록시를 거치면 요청 하나가 오래 걸려(docs/DEVELOPMENT_NOTES.md)
+        순서대로 조회하면 모달이 너무 늦게 뜸. 결과 순서는 ocr_results와 같음.
+        """
+        if not ocr_results:
+            return []
         with self._client() as client:
             season_id = current_season_id(client)
-            team = []
-            for ocr, resolved in zip(ocr_results, resolve_teammate_names(client, ocr_results)):
+        with ThreadPoolExecutor(max_workers=len(ocr_results)) as pool:
+            team = list(pool.map(lambda ocr: self._teammate_stats(ocr, season_id), ocr_results))
+        return [stats for stats in team if stats is not None]
+
+    def _teammate_stats(self, ocr: dict, season_id: Optional[int]) -> Optional[dict]:
+        """팀원 한 명 (스레드마다 Client를 따로 씀). 읽은 글자도 없는 빈 칸이면 None."""
+        nickname = None
+        try:
+            with self._client() as client:
+                resolved = resolve_teammate_names(client, [ocr])[0]
                 nickname = resolved["resolved_nickname"]
                 if nickname and season_id is not None:
-                    try:
-                        team.append(fetch_user_stats(client, nickname, season_id, self.character_names))
-                        continue
-                    except Exception as e:
-                        print(f"  '{nickname}' 전적 조회 실패: {e!r}")
-                fallback = nickname or ocr.get("best") or ""
-                if fallback:
-                    team.append(failed_stats(fallback))
-            return team
+                    return fetch_user_stats(client, nickname, season_id, self.character_names, resolved["user_id"])
+        except Exception as e:  # 한 명이 실패해도 나머지 팀원은 보여줌
+            print(f"  '{nickname or ocr.get('best')}' 전적 조회 실패: {e!r}")
+        fallback = nickname or ocr.get("best") or ""
+        return failed_stats(fallback) if fallback else None
 
     def user_stats(self, nickname: str) -> Optional[dict]:
         if not nickname.strip():

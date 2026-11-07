@@ -1,5 +1,7 @@
 """player_stats: 티어 계산, 전적 dict 조립 (가짜 API 클라이언트)."""
 
+import threading
+import time
 from types import SimpleNamespace
 
 from lumi.api import player_stats
@@ -88,3 +90,47 @@ def test_team_stats_with_unresolved_slot(monkeypatch):
     assert team[0]["user_id"] == "uid-1"
     assert (team[1]["tier"], team[1]["user_id"]) == ("조회 실패", None)  # 못 찾으면 수정 가능한 카드
     assert provider.user_stats("Nobody") is None
+
+
+def test_team_stats_runs_concurrently_and_keeps_order(monkeypatch):
+    """프록시를 거치면 요청이 느려서 팀원을 동시에 조회함. 늦게 끝난 팀원도 제자리에 있어야 함"""
+    monkeypatch.setattr(player_stats, "current_season_id", lambda client: 31)
+    both_started = threading.Barrier(3, timeout=5)  # 3명이 동시에 조회 중이 아니면 BrokenBarrierError
+
+    def resolve(client, ocr_results):
+        name = ocr_results[0]["best"]
+        both_started.wait()
+        if name == "A":
+            time.sleep(0.1)  # 첫 팀원이 가장 늦게 끝남
+        return [{"resolved_nickname": name, "user_id": f"uid-{name}"}]
+
+    monkeypatch.setattr(player_stats, "resolve_teammate_names", resolve)
+    used_ids = []
+
+    def fetch(client, nickname, season_id, character_names, user_id=None):
+        used_ids.append(user_id)
+        return player_stats.failed_stats(nickname)
+
+    monkeypatch.setattr(player_stats, "fetch_user_stats", fetch)
+    provider = player_stats.EternalReturnStats(FakeClient)
+    team = provider.team_stats([{"name": n, "best": n} for n in ("A", "B", "C")])
+    assert [s["nickname"] for s in team] == ["A", "B", "C"]
+    assert sorted(used_ids) == ["uid-A", "uid-B", "uid-C"]  # 확정 때 얻은 uid를 다시 조회하지 않음
+
+
+def test_one_failed_teammate_keeps_the_others(monkeypatch):
+    monkeypatch.setattr(player_stats, "current_season_id", lambda client: 31)
+
+    def resolve(client, ocr_results):
+        name = ocr_results[0]["best"]
+        if name == "B":
+            raise RuntimeError("network")
+        return [{"resolved_nickname": name, "user_id": f"uid-{name}"}]
+
+    monkeypatch.setattr(player_stats, "resolve_teammate_names", resolve)
+    monkeypatch.setattr(
+        player_stats, "fetch_user_stats",
+        lambda client, nickname, *a, **k: dict(player_stats.failed_stats(nickname), tier="골드 I"),
+    )
+    team = player_stats.EternalReturnStats(FakeClient).team_stats([{"name": n, "best": n} for n in ("A", "B")])
+    assert [(s["nickname"], s["tier"]) for s in team] == [("A", "골드 I"), ("B", "조회 실패")]

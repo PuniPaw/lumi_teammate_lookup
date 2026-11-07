@@ -3,6 +3,11 @@ name = "lumi-proxy"
 main = "worker.js"
 compatibility_date = "2026-10-01"
 
+# Worker를 Open API에 가까운 곳에서 실행 (한국 사용자도 Cloudflare 미국 서버로 연결되는 경우가 있어
+# 미국 <-> Open API 왕복이 느림). 트래픽이 어느 정도 쌓여야 위치가 옮겨질 수 있음
+[placement]
+mode = "smart"
+
 # IP별 요청 제한: 60초에 120회 (period는 10 또는 60만 가능). 정확한 제한은 아니고 남용 방지용
 # 한 판에 약 15회 조회 + 모달에서 닉네임 수정 재조회 정도라 일반 사용자는 걸리지 않음
 [[ratelimits]]

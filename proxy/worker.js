@@ -6,8 +6,9 @@
  *
  * - 앱이 쓰는 GET 경로만 허용 (ROUTES). 나머지는 403
  * - 응답 캐시: 같은 팀원을 여러 사용자가 조회하는 일이 많아 Open API 호출 수가 줄어듦
- *     1) 메모리 (Worker 인스턴스마다, 재시작하면 비워짐) - workers.dev에서도 동작
- *     2) Cache API - 커스텀 도메인에서만 동작 (workers.dev에서는 아무 일도 안 함)
+ *     1) 메모리 (Worker 인스턴스마다, 재시작하면 비워짐)
+ *     2) Cache API (Cloudflare 문서에는 workers.dev에서 동작하지 않는다고 나오지만, 실측에서는
+ *        x-lumi-cache: edge, age 헤더로 캐시 응답이 나옴. 언제든 안 될 수 있다고 보고 메모리와 같이 씀)
  * - IP별 요청 제한 (RATE_LIMITER 바인딩, wrangler.toml). 정확한 제한은 아니고 남용을 막는 정도
  */
 
@@ -15,7 +16,9 @@ const UPSTREAM = "https://open-api.bser.io";
 
 // [경로 정규식, 캐시 시간(초)]. bserpy가 실제로 부르는 경로 (lumi/api, bserpy/resources)
 const ROUTES = [
-  [/^\/v1\/user\/nickname$/, 24 * 3600], // 닉네임 -> uid (?query=닉네임)
+  // 닉네임 -> uid (?query=닉네임). Open API는 조회할 때마다 다른 uid를 주고 유효 기간을 알 수 없어서
+  // 길게 캐시하지 않음 (uid가 만료되면 그 유저는 캐시가 끝날 때까지 조회 실패). 전적 캐시와 같은 시간
+  [/^\/v1\/user\/nickname$/, 5 * 60],
   [/^\/v1\/rank\/uid\/[^/]+\/\d+\/\d+$/, 5 * 60], // 랭크/MMR
   [/^\/v2\/user\/stats\/uid\/[^/]+\/\d+\/\d+$/, 5 * 60], // 시즌 통계
   [/^\/v1\/user\/games\/uid\/[^/]+$/, 2 * 60], // 최근 게임 (?next=커서)
@@ -25,6 +28,9 @@ const ROUTES = [
 
 // 응답 본문 code가 404(없는 닉네임 등)이면 짧게 캐시 (닉네임을 방금 바꾼 유저가 있을 수 있음)
 const NOT_FOUND_TTL = 10 * 60;
+
+// 캐시 시간을 줄이면 올려서, 예전 시간으로 저장된 Cache API 항목을 쓰지 않게 함
+const CACHE_VERSION = "v2";
 
 const MEMORY_MAX_ENTRIES = 2000;
 const memory = new Map(); // url -> { body, status, expires }
@@ -104,7 +110,7 @@ export default {
     if (hit) return respond(hit, "memory");
 
     const cache = caches.default;
-    const cacheKey = new Request(`https://lumi-cache${key}`);
+    const cacheKey = new Request(`https://lumi-cache-${CACHE_VERSION}${key}`);
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
 

@@ -8,9 +8,9 @@ lumi 앱 ──(키 없음)──> lumi-proxy (Cloudflare Worker) ──(x-api-k
 ```
 
 - 앱이 쓰는 GET 경로만 허용합니다 (`worker.js`의 `ROUTES`). 다른 경로는 403.
-- 응답을 캐시합니다 (닉네임→uid 1일, 랭크/통계 5분, 최근 게임 2분, 메타 데이터 1일, 없는 닉네임 10분).
+- 응답을 캐시합니다 (닉네임→uid 5분, 랭크/통계 5분, 최근 게임 2분, 메타 데이터 1일, 없는 닉네임 5분). uid는 조회할 때마다 값이 달라지고 유효 기간을 알 수 없어 길게 캐시하지 않습니다.
   같은 팀원을 여러 사용자가 조회하는 일이 많아 Open API 호출이 줄어듭니다.
-  - `workers.dev` 주소에서는 Worker 인스턴스 메모리 캐시만 동작합니다 (Cloudflare Cache API는 커스텀 도메인에서만 동작).
+  - 메모리 캐시와 Cloudflare Cache API를 같이 씁니다. 문서에는 Cache API가 `workers.dev`에서 동작하지 않는다고 나오지만 실측에서는 캐시 응답이 나왔습니다.
 - IP별 요청 제한: 60초에 120회 (`wrangler.toml`). 정확한 제한은 아니고 남용을 막는 정도입니다.
 - 응답 헤더 `x-lumi-cache`: `miss`(Open API 호출), `memory`, `edge`(캐시).
 
@@ -52,6 +52,6 @@ npx wrangler deploy
 
 ## 비용과 한도
 
-- Workers 무료 플랜: 하루 요청 10만 회. 한 판에 약 15회라 캐시 없이도 하루 약 6,600판.
+- Workers 무료 플랜: 하루 요청 10만 회. 한 판에 약 19회(팀원 3명, 최근 게임 3페이지씩)라 캐시 없이도 하루 약 5,200판.
 - 먼저 걸릴 가능성이 높은 건 Open API 키의 요청 한도입니다. 사용자가 늘면 개발자 포털에서 한도 상향을 신청하세요.
 - 사용량은 Cloudflare 대시보드 → Workers & Pages → lumi-proxy에서 볼 수 있습니다.

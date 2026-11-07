@@ -29,8 +29,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "lumi") if FROZEN else PROJECT_ROOT
 _DEFAULT_LOG_PATH = r"%USERPROFILE%\AppData\LocalLow\NimbleNeuron\Eternal Return\Player.log"
 
-# API 키를 가진 프록시 서버 주소. 사용자는 키 없이 이 주소로 조회함. 프록시를 배포하면 채움
-DEFAULT_API_URL: Optional[str] = None
+# API 키를 가진 프록시 서버 주소 (proxy/). 사용자는 키 없이 이 주소로 조회함
+DEFAULT_API_URL: Optional[str] = "https://lumi-proxy.lumi-lookup.workers.dev"
 
 
 @dataclass(frozen=True)
