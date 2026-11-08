@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from conftest import fixture  # noqa: E402
 from lumi.api.player_stats import failed_stats  # noqa: E402
@@ -129,6 +129,54 @@ def test_modal_shows_failed_season_lookup():
     stats = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="다이아몬드 IV", games=None)
     row = TeammateRow(stats, refetch=lambda n: None)
     assert row.detail_line.text() == "시즌 통계 조회 실패"
+
+
+def test_modal_lists_characters_and_says_when_no_ranked_games():
+    QApplication.instance() or QApplication([])
+    character = {"code": 1, "name": "재키", "games": 4, "avg_damage": 15200, "avg_team_kill": 9.4, "avg_rp": -12}
+    stats = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="골드 I", recent_games=4, recent_characters=[character])
+    row = TeammateRow(stats, refetch=lambda n: None)
+    labels = row.table.findChildren(QLabel)
+    assert [label.text() for label in labels if label.text()][-4:] == ["4", "15.2k", "9.4", "-12"]
+    assert [label.toolTip() for label in labels if label.toolTip()] == ["재키"]  # 이름은 아이콘에 마우스를 올리면
+
+    row._apply_stats(dict(stats, recent_games=0, recent_characters=[]))
+    assert row.recent_line.text() == "최근 랭크 기록 없음"
+    assert row.table.isHidden()
+
+
+def test_moved_overlay_reopens_where_it_was_left(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    path = str(tmp_path / "overlay_position.json")
+    team = [failed_stats("PuniPaw")]
+    first = OverlayWindow(team, refetch=lambda n: None, position_file=path)
+    screen = app.primaryScreen().availableGeometry()
+    first.move(screen.left() + 30, screen.top() + 40)
+    first.save_position()
+
+    second = OverlayWindow(team, refetch=lambda n: None, position_file=path)
+    assert (second.x(), second.y()) == (screen.left() + 30, screen.top() + 40)
+
+
+def test_saved_position_off_every_screen_falls_back_to_top_right(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    path = tmp_path / "overlay_position.json"
+    path.write_text('{"x": -99999, "y": -99999}', encoding="utf-8")
+    window = OverlayWindow([failed_stats("PuniPaw")], refetch=lambda n: None, position_file=str(path))
+    screen = app.primaryScreen().availableGeometry()
+    assert screen.contains(window.frameGeometry().topRight())
+    assert window.frameGeometry().right() >= screen.right() - 100
+
+    path.write_text("not json", encoding="utf-8")
+    window = OverlayWindow([failed_stats("PuniPaw")], refetch=lambda n: None, position_file=str(path))
+    assert window.frameGeometry().right() >= screen.right() - 100
+
+
+def test_card_of_unfound_player_does_not_claim_no_record():
+    QApplication.instance() or QApplication([])
+    row = TeammateRow(failed_stats("MirNight"), refetch=lambda n: None)
+    assert "기록 없음" not in row.detail_line.text()
+    assert row.recent_line.isHidden() and row.table.isHidden()
 
 
 class FixedReader:

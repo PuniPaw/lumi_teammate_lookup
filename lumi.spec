@@ -15,7 +15,7 @@ rapidocr_data = [
 a = Analysis(
     ["lumi/__main__.py"],
     pathex=["."],
-    datas=rapidocr_data,
+    datas=rapidocr_data + [("lumi/assets/characters", "lumi/assets/characters")],
     hiddenimports=collect_submodules("rapidocr") + ["lumi.app"],
     excludes=["tkinter", "pytest", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtNetwork", "PySide6.QtPdf"],
 )

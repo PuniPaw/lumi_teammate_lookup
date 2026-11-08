@@ -44,8 +44,6 @@ def failed_stats(nickname: str) -> dict:
     return {
         "nickname": nickname,
         "tier": FAILED_TIER,
-        "top_character": "?",
-        "top_character_games": 0,
         "mmr": 0,
         "games": 0,
         "top1": 0,
@@ -94,25 +92,22 @@ def fetch_user_stats(
                 top3=season.top3 * 100,
                 average_rank=round(season.average_rank, 1),
             )
-            if season.character_stats:
-                most = max(season.character_stats, key=lambda c: c.total_games)
-                stats.update(
-                    top_character=character_names.get(most.character_code, f"코드{most.character_code}"),
-                    top_character_games=most.total_games,
-                )
     except Exception as e:
         stats["games"] = None  # 0은 '시즌 기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 시즌 통계 조회 실패 ({e!r})")
 
     try:
-        stats.update(get_recent_stats(client, user_id, count=RECENT_GAME_COUNT))
+        # 시즌 랭크가 RECENT_GAME_COUNT보다 적으면 그 판수만큼만 찾음 (시즌 통계를 못 받았으면 RECENT_GAME_COUNT)
+        season_games = stats["games"]
+        count = RECENT_GAME_COUNT if season_games is None else min(RECENT_GAME_COUNT, season_games)
+        stats.update(get_recent_stats(client, user_id, character_names, count=count, season_id=season_id))
     except Exception as e:
         stats["recent_games"] = None  # 0은 '기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 최근 게임 조회 실패 ({e!r})")
 
     print(
         f"  {nickname}: {stats['tier']}, 승률 {stats['top1']:.0f}% ({stats['games']}판), "
-        f"모스트 {stats['top_character']} ({stats['top_character_games']}판), {format_recent_stats(stats)}"
+        + format_recent_stats(stats).replace("\n", " / ")
     )
     return stats
 

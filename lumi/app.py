@@ -147,11 +147,14 @@ class MatchWorker(QObject):
 class OverlayController(QObject):
     """메인(Qt) 스레드에서 모달 표시/닫기."""
 
-    def __init__(self, screen: ScreenSource, stats: StatsProvider, debug: DebugStore):
+    def __init__(
+        self, screen: ScreenSource, stats: StatsProvider, debug: DebugStore, position_file: Optional[str] = None
+    ):
         super().__init__()
         self.screen = screen
         self.stats = stats
         self.debug = debug
+        self.position_file = position_file  # 사용자가 옮긴 모달 위치 (다음 매칭과 재실행에도 유지)
         self.window: Optional[OverlayWindow] = None
         self.presence: Optional[LobbyPresence] = None
         self.timer = QTimer(self)
@@ -173,7 +176,7 @@ class OverlayController(QObject):
 
     def on_team_ready(self, team_stats: list, reference: list) -> None:
         self.close_overlay()
-        self.window = OverlayWindow(team_stats, refetch=self.stats.user_stats)
+        self.window = OverlayWindow(team_stats, refetch=self.stats.user_stats, position_file=self.position_file)
         self.window.show()
         self.window.raise_()
         if self.debug.enabled:
@@ -220,7 +223,7 @@ def build(settings: Settings, make_client) -> tuple[MatchWorker, OverlayControll
     debug = DebugStore(settings.debug, settings.debug_dir)
 
     worker = MatchWorker(PlayerLog(settings.log_path), screen, PaddleReader(), stats, debug)
-    controller = OverlayController(screen, stats, debug)
+    controller = OverlayController(screen, stats, debug, settings.overlay_position_file)
     connect(worker, controller)
     return worker, controller
 

@@ -4,8 +4,8 @@
 
 모달에 표시되는 정보 (팀원별):
 - 현재 시즌 랭크 티어 / MMR
-- 모스트 캐릭터, 판수, 평균 순위, 승률(1·2·3위 비율)
-- 최근 20게임(일반+랭크) 평균 딜량, 평균 TK
+- 이번 시즌 랭크 판수, 평균 순위, 승률
+- 이번 시즌 최근 랭크 게임(10판, 시즌 판수가 적으면 그만큼)에서 많이 한 캐릭터 5개와 캐릭터별 평균 딜량, 평균 TK
 
 ## 준비
 
@@ -53,7 +53,7 @@ lumi/
   ocr/              paddle.py PP-OCR (PaddleReader), image.py 테두리 제거/빈 칸 판별,
                     chars.py 문자 종류, candidates.py 잡음 후보/비슷한 글자
   api/              client.py API 클라이언트(직접/프록시), resolve.py 닉네임 확정,
-                    player_stats.py 전적 (EternalReturnStats), recent_stats.py 최근 20게임
+                    player_stats.py 전적 (EternalReturnStats), recent_stats.py 최근 랭크 10게임
   ui/               overlay.py 모달
   debug/            store.py 디버그 이미지, crops.py / check.py 확인 도구
 tests/              fixtures/ 실제 게임 화면

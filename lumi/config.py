@@ -42,6 +42,7 @@ class Settings:
     game_window_title: str = "Eternal Return"
     log_path: str = os.path.expandvars(_DEFAULT_LOG_PATH)
     debug_dir: str = os.path.join(DATA_DIR, "debug")
+    overlay_position_file: str = os.path.join(DATA_DIR, "overlay_position.json")
 
 
 def _flag(value: str) -> bool:

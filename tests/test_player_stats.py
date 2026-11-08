@@ -24,7 +24,9 @@ class FakeUsers:
     def __init__(self, rank_error=False):
         self.rank_error = rank_error
         self._t = SimpleNamespace(
-            get=lambda path, **kw: {"userGames": [{"gameId": 1, "matchingMode": 3, "damageToPlayer": 12000, "teamKill": 8}]}
+            get=lambda path, **kw: {
+                "userGames": [{"gameId": 1, "matchingMode": 3, "characterNum": 1, "damageToPlayer": 12000, "teamKill": 8}]
+            }
         )
 
     def get_uid(self, nickname):
@@ -49,8 +51,8 @@ def test_fetch_user_stats():
     assert stats["user_id"] == "uid-1"
     assert (stats["tier"], stats["mmr"]) == ("다이아몬드 II", 5780)
     assert (stats["games"], round(stats["top1"]), stats["average_rank"]) == (120, 14, 4.3)
-    assert (stats["top_character"], stats["top_character_games"]) == ("재키", 40)
-    assert (stats["recent_games"], stats["avg_damage_to_player"], stats["avg_team_kill"]) == (1, 12000, 8)
+    assert stats["recent_games"] == 1
+    assert stats["recent_characters"] == [{"code": 1, "name": "재키", "games": 1, "avg_damage": 12000, "avg_team_kill": 8, "avg_rp": 0}]
 
 
 def test_fetch_user_stats_without_rank():
@@ -94,7 +96,7 @@ def test_player_without_recent_games_is_shown_as_no_record():
     users = FakeUsers()
     users._t = SimpleNamespace(get=lambda path, **kw: {"userGames": []})
     stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
-    assert format_recent_stats(stats) == "최근 게임 기록 없음"
+    assert format_recent_stats(stats) == "최근 랭크 기록 없음"
 
 
 class FakeClient:
