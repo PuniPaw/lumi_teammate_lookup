@@ -6,8 +6,7 @@
 
 import sys
 
-from bserpy import Client
-
+from lumi.api.client import MISSING_API_MESSAGE, client_factory
 from lumi.api.resolve import resolve_teammate_names
 from lumi.capture.screen import ImageScreen, LiveScreen
 from lumi.config import load_settings
@@ -16,8 +15,9 @@ from lumi.ocr.paddle import PaddleReader
 
 def main() -> None:
     settings = load_settings()
-    if not settings.api_key:
-        print("ETERNAL_RETURN_API_KEY가 설정되지 않았습니다. .env를 확인하세요.")
+    make_client = client_factory(settings)
+    if make_client is None:
+        print(MISSING_API_MESSAGE)
         return
 
     screen = ImageScreen(sys.argv[1]) if len(sys.argv) > 1 else LiveScreen(settings.game_window_title)
@@ -27,7 +27,7 @@ def main() -> None:
     for r in ocr_results:
         print(f"{r['name']}: {r['best']!r} (점수 {r['confidence']})  후보: {r['candidates'][:6]}")
 
-    with Client(api_key=settings.api_key) as client:
+    with make_client() as client:
         resolved = resolve_teammate_names(client, ocr_results)
 
     print("\n--- 확정 결과 ---")

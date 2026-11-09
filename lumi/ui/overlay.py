@@ -1,26 +1,129 @@
-"""팀원 전적 모달 창 (PySide6)."""
+"""팀원 전적 모달 창 (PySide6). 팀원 카드를 가로로 나란히 놓습니다."""
 
+import json
+import os
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QCursor, QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsOpacityEffect,
+    QGridLayout,
+    QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QPushButton,
-    QScrollArea,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
-from lumi.api.recent_stats import format_recent_stats
+from lumi.api.player_stats import STAGE_LOOKUP, STAGE_RECENT
+from lumi.api.recent_stats import recent_games_title
 
 # 닉네임 -> 전적 dict (못 찾으면 None). 모달에서 닉네임을 고쳐 Enter를 누를 때 사용
 Refetch = Callable[[str], Optional[dict]]
 
-WINDOW_WIDTH = 340
+CARD_WIDTH = 256
 SCREEN_MARGIN = 20
+# 글자 크기(px). 게임 화면 위에서 읽히도록 키움
+FONT_NICKNAME, FONT_TIER, FONT_BODY, FONT_SMALL = 16, 13, 13, 11
+TABLE_SIDE_PADDING = 4
+# 이보다 적은 판수의 캐릭터 줄은 흐리게. 한 판의 딜량은 평균에서 보통 ±35% 흔들려서(실측)
+# 2판 이하의 평균은 ±25% 넘게 흔들릴 수 있음 (docs/DEVELOPMENT_NOTES.md)
+RELIABLE_GAMES = 3
+
+BACKGROUND, CARD, LINE = "#16181d", "#22252c", "#2f333b"
+TEXT, SUB, DIM = "#e8e8e8", "#a9adb6", "#5f646e"
+NICKNAME, GAIN, LOSS, ERROR = "#ffd166", "#6ee7a8", "#f87171", "#ff6b6b"
+TIER_COLORS = {
+    "이터니티": "#ff5c8a", "미스릴": "#c084fc", "메테오라이트": "#7dd3fc", "다이아몬드": "#67e8f9",
+    "플래티넘": "#5eead4", "골드": "#fbbf24", "실버": "#cbd5e1", "브론즈": "#d4a373", "아이언": "#9ca3af",
+}
+RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+ICON_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "characters")
+ICON_SIZE = 26
+COLUMNS = ("", "판", "딜량", "TK", "RP")
+# 캐릭터를 시즌 모스트로 골랐을 때 (시즌 판수 칸 추가)
+SEASON_COLUMNS = ("", "시즌", "최근", "딜량", "TK", "RP")
+
+
+def _label(text: str = "", color: str = TEXT, size: int = FONT_BODY, bold: bool = False, align=None) -> QLabel:
+    label = QLabel(text)
+    label.setStyleSheet(f"color: {color}; font-size: {size}px; {'font-weight: bold;' if bold else ''} background: transparent;")
+    if align is not None:
+        label.setAlignment(align)
+    return label
+
+
+def character_icon(code) -> Optional[QPixmap]:
+    """팬키트 초상화 아이콘 (lumi.debug.fankit_icons로 만듦). 없으면 None."""
+    pixmap = QPixmap(os.path.join(ICON_DIR, f"{code}.png"))
+    if pixmap.isNull():
+        return None
+    pixmap.setDevicePixelRatio(pixmap.width() / ICON_SIZE)  # 48px 원본을 논리 크기로 (고배율 화면에서 선명)
+    return pixmap
+
+
+class CharacterIcon(QLabel):
+    """마우스를 올리면 캐릭터 이름을 띄움.
+
+    Qt의 기본 툴팁은 활성 창에서만 뜨는데, 모달은 게임 포커스를 뺏지 않아 늘 비활성이라
+    직접 띄움 (WA_AlwaysShowToolTips만으로는 실제 창에서 뜨지 않았음).
+    """
+
+    def enterEvent(self, event):  # noqa: N802 (Qt 이벤트 이름)
+        QToolTip.showText(QCursor.pos(), self.toolTip(), self)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
+
+def _character_cell(character: dict, reliable: bool) -> QLabel:
+    """아이콘만 표시 (이름과 무기는 마우스를 올리면). 아이콘이 없는 캐릭터는 이름 앞 두 글자."""
+    pixmap = character_icon(character["code"])
+    cell = CharacterIcon()
+    tooltip = f"{character['name']}({character['weapon']})" if character.get("weapon") else character["name"]
+    if character.get("season_games") is not None:
+        tooltip += f"  ·  시즌 {character['season_games']}판"
+    cell.setToolTip(tooltip)
+    if pixmap is not None:
+        cell.setPixmap(pixmap)
+    else:
+        cell.setText(character["name"][:2])
+        cell.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    cell.setFixedSize(ICON_SIZE, ICON_SIZE)
+    cell.setStyleSheet(f"background: {LINE}; border-radius: 4px; color: {TEXT}; font-size: {FONT_SMALL}px;")
+    if not reliable:
+        effect = QGraphicsOpacityEffect(cell)
+        effect.setOpacity(0.4)
+        cell.setGraphicsEffect(effect)
+    return cell
+
+
+def tier_text(stats: dict) -> tuple[str, str]:
+    """(티어 문구, 색)."""
+    tier = stats["tier"]
+    color = next((c for name, c in TIER_COLORS.items() if tier.startswith(name)), SUB)
+    if stats.get("mmr", 0) > 0:
+        return f"{tier}  ·  {stats['mmr']}", color
+    return tier, ERROR if tier == "조회 실패" else color
+
+
+def season_text(stats: dict) -> str:
+    if stats["games"] is None:
+        return "시즌 통계 조회 실패"
+    if stats["games"] == 0:
+        return "이번 시즌 랭크 기록 없음"
+    parts = [f"시즌 {stats['games']}판"]
+    if stats.get("average_rank", 0) > 0:
+        parts.append(f"평균 {stats['average_rank']:.1f}등")
+    parts.append(f"승률 {stats['top1']:.0f}%")
+    return "  ·  ".join(parts)
 
 
 class TeammateRow(QFrame):
@@ -29,57 +132,113 @@ class TeammateRow(QFrame):
     def __init__(self, stats: dict, refetch: Refetch):
         super().__init__()
         self._refetch = refetch
-        self.setStyleSheet("background-color: #2a2a2a; border-radius: 6px;")
+        self._edited = False  # 사용자가 닉네임을 고쳐 재조회했으면 늦게 온 자동 조회 결과로 덮지 않음
+        self.setFixedWidth(CARD_WIDTH)
+        self.setStyleSheet(f"TeammateRow {{ background-color: {CARD}; border-radius: 8px; }}")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(2)
 
         self.nickname_edit = QLineEdit(stats["nickname"])
         self.nickname_edit.setStyleSheet(
-            "color: #ffd166; font-weight: bold; font-size: 13px;"
-            "background: transparent; border: none; padding: 0;"
+            f"color: {NICKNAME}; font-weight: bold; font-size: {FONT_NICKNAME}px;"
+            " background: transparent; border: none; padding: 0;"
         )
         self.nickname_edit.returnPressed.connect(self._on_nickname_submitted)
 
-        self.tier_line = self._label("color: #ffd700; font-size: 11px; font-weight: bold;")
-        self.detail_line = self._label("color: #cccccc; font-size: 10px;")
-        self.recent_line = self._label("color: #8ecae6; font-size: 10px;")
-        self.status_line = self._label("color: #ff6b6b; font-size: 10px;")
+        self.tier_line = _label(size=FONT_TIER, bold=True)
+        self.detail_line = _label(color=SUB, size=FONT_SMALL)
+        self.recent_line = _label(color=SUB, size=FONT_SMALL)
+        self.table = QWidget()
+        self.table.setStyleSheet("background: transparent;")  # 창 배경색이 상속되면 카드 안에 어두운 상자가 생김
+        self.table_layout = QGridLayout(self.table)
+        self.table_layout.setContentsMargins(TABLE_SIDE_PADDING, 2, TABLE_SIDE_PADDING, 2)
+        self.table_layout.setHorizontalSpacing(6)
+        self.table_layout.setVerticalSpacing(3)
+        self.status_line = _label(color=ERROR, size=FONT_SMALL)
         self.status_line.hide()
 
-        for widget in (self.nickname_edit, self.tier_line, self.detail_line, self.recent_line, self.status_line):
+        separator = QFrame()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet(f"background: {LINE};")
+        for widget in (self.nickname_edit, self.tier_line, self.detail_line, separator, self.recent_line, self.table):
             layout.addWidget(widget)
+        layout.addStretch()
+        layout.addWidget(self.status_line)
         self._apply_stats(stats)
 
-    @staticmethod
-    def _label(style: str) -> QLabel:
-        label = QLabel()
-        label.setStyleSheet(style)
-        return label
+    def show_stats(self, stats: dict) -> None:
+        """조회가 진행되면서 오는 전적으로 카드를 다시 그림."""
+        if not self._edited:
+            self._apply_stats(stats)
 
     def _apply_stats(self, stats: dict) -> None:
-        tier = f"🏆 {stats['tier']}"
-        if stats.get("mmr", 0) > 0:
-            tier += f" (MMR: {stats['mmr']})"
-        self.tier_line.setText(tier)
-
-        line1 = f"모스트 {stats['top_character']} {stats['top_character_games']}판"
-        if stats.get("games", 0) > 0:
-            line1 += f"  ·  전체 {stats['games']}판"
-        if stats.get("average_rank", 0) > 0:
-            line1 += f"  ·  평균 {stats['average_rank']:.2f}등"
-        rates = [
-            f"{label} {stats[key]:.0f}%"
-            for key, label in (("top1", "승률"), ("top2", "2위"), ("top3", "3위"))
-            if stats.get(key, 0) > 0
-        ]
-        self.detail_line.setText(line1 + ("\n" + "  ·  ".join(rates) if rates else ""))
-
+        stage = stats.get("stage")
+        if stage == STAGE_LOOKUP:
+            self.tier_line.setText("조회 중...")
+            self.tier_line.setStyleSheet(f"color: {SUB}; font-size: {FONT_TIER}px; background: transparent;")
+            self.detail_line.setText("")
+            self.recent_line.hide()
+            self._fill_table([])
+            return
+        text, color = tier_text(stats)
+        self.tier_line.setText(text)
+        self.tier_line.setStyleSheet(
+            f"color: {color}; font-size: {FONT_TIER}px; font-weight: bold; background: transparent;"
+        )
         # 유저 조회 자체가 실패한 카드에 '기록 없음'을 띄우면 오해를 주므로 숨김
-        self.recent_line.setVisible(bool(stats.get("user_id")))
-        self.recent_line.setText(format_recent_stats(stats))
+        found = bool(stats.get("user_id"))
+        self.detail_line.setText(season_text(stats) if found else "이름을 고쳐 Enter를 누르면 다시 조회합니다")
+        self.recent_line.setVisible(found)
+        if stage == STAGE_RECENT:
+            self.recent_line.setText("최근 랭크 게임 불러오는 중...")
+            self._fill_table([])
+            return
+        self.recent_line.setText(recent_games_title(stats))
+        self._fill_table(stats["recent_characters"] if found else [])
+
+    def _fill_table(self, characters: list[dict]) -> None:
+        while self.table_layout.count():
+            self.table_layout.takeAt(0).widget().deleteLater()
+        self.table.setVisible(bool(characters))
+        if not characters:
+            return
+        from_season = any(c.get("season_games") is not None for c in characters)
+        columns = SEASON_COLUMNS if from_season else COLUMNS
+        for col, title in enumerate(columns):
+            self.table_layout.addWidget(_label(title, DIM, FONT_SMALL, align=RIGHT), 0, col)
+        for row, c in enumerate(characters, start=1):
+            reliable = c["games"] >= RELIABLE_GAMES
+            main, sub = (TEXT, SUB) if reliable else (DIM, DIM)
+            self.table_layout.addWidget(_character_cell(c, reliable), row, 0)
+            # 무기별로 나뉜 같은 캐릭터 줄은 붙어 있고, 시즌 판수는 무기를 나누지 않은 값이라 그 줄들에 한 칸으로 걸침
+            first = row == 1 or characters[row - 2]["code"] != c["code"]
+            span = next((i for i, d in enumerate(characters[row - 1:]) if d["code"] != c["code"]), len(characters) - row + 1)
+            if from_season and first:
+                # 시즌 판수는 최근 판수와 상관없이 믿을 만해서 흐리게 하지 않음
+                # 시즌 모스트(3개) 밖에서 최근 게임으로 채운 캐릭터는 시즌 판수를 모름
+                season = "–" if c["season_games"] is None else str(c["season_games"])
+                color = SUB if c["season_games"] is not None else DIM
+                self.table_layout.addWidget(_label(season, color, align=RIGHT), row, 1, span, 1)
+            if c["games"]:
+                rp_color = (GAIN if c["avg_rp"] >= 0 else LOSS) if reliable else DIM
+                numbers = [
+                    _label(str(c["games"]), sub, align=RIGHT),
+                    _label(f"{c['avg_damage'] / 1000:.1f}k", main, bold=reliable, align=RIGHT),
+                    _label(f"{c['avg_team_kill']:.1f}", sub, align=RIGHT),
+                    _label(f"{c['avg_rp']:+.0f}", rp_color, align=RIGHT),
+                ]
+            else:  # 시즌 모스트지만 최근 게임에서는 안 함
+                numbers = [_label("0", DIM, align=RIGHT)] + [_label("–", DIM, align=RIGHT) for _ in range(3)]
+            for col, cell in enumerate(numbers, start=len(columns) - len(numbers)):
+                self.table_layout.addWidget(cell, row, col)
+        # 아이콘 칸은 고정, 숫자 칸들이 남은 폭을 똑같이 나눔 (아이콘과 숫자 사이가 벌어지지 않게).
+        # 재조회로 칸 수가 줄어도 남은 칸이 늘어나지 않게 전부 다시 설정
+        for col in range(1, len(SEASON_COLUMNS)):
+            self.table_layout.setColumnStretch(col, 1 if col < len(columns) else 0)
 
     def _on_nickname_submitted(self) -> None:
+        self._edited = True
         nickname = self.nickname_edit.text().strip()
         self.status_line.hide()
         self.detail_line.setText("조회 중...")
@@ -100,7 +259,7 @@ class DraggableHeader(QLabel):
         super().__init__(text)
         self._window = window
         self._drag_offset = None
-        self.setStyleSheet("color: white; font-weight: bold; font-size: 14px; padding: 6px;")
+        self.setStyleSheet(f"color: {TEXT}; font-weight: bold; font-size: {FONT_TIER}px; padding: 2px;")
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def mousePressEvent(self, event):  # noqa: N802 (Qt 이벤트 이름)
@@ -112,14 +271,17 @@ class DraggableHeader(QLabel):
             self._window.move(event.globalPosition().toPoint() - self._drag_offset)
 
     def mouseReleaseEvent(self, event):  # noqa: N802
+        if self._drag_offset is not None:
+            self._window.save_position()
         self._drag_offset = None
 
 
 class OverlayWindow(QWidget):
-    """팀원 카드들을 보여주는 항상-위 창."""
+    """팀원 카드들을 가로로 보여주는 항상-위 창."""
 
-    def __init__(self, team_stats: list[dict], refetch: Refetch):
+    def __init__(self, team_stats: list[dict], refetch: Refetch, position_file: Optional[str] = None):
         super().__init__()
+        self._position_file = position_file
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -127,46 +289,92 @@ class OverlayWindow(QWidget):
         )
         # 뜰 때 게임 포커스를 뺏지 않음 (클릭하면 그때 활성화)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setStyleSheet("background-color: #1e1e1e;")
-        self.setFixedWidth(WINDOW_WIDTH)
+        self.setStyleSheet(f"background-color: {BACKGROUND};")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 10)
+        layout.setContentsMargins(8, 6, 8, 8)
         layout.setSpacing(6)
-        layout.addWidget(DraggableHeader("🎮 팀원 전적  (이름 클릭해서 수정 가능)", self))
+        # 창 크기를 항상 내용에 맞춤. 스타일시트 글자 크기는 표시 직전에 적용돼서, 미리 잰 크기로는
+        # 마지막 캐릭터 줄이 잘렸음 (재조회로 줄 수가 바뀔 때도 맞춰짐)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
 
-        cards = QWidget()
-        cards.setStyleSheet("background-color: transparent;")
-        cards_layout = QVBoxLayout(cards)
-        cards_layout.setSpacing(6)
-        for stats in team_stats:
-            cards_layout.addWidget(TeammateRow(stats, refetch))
-        cards_layout.addStretch()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("background-color: transparent; border: none;")
-        scroll.setWidget(cards)
-        layout.addWidget(scroll)
-
-        close_btn = QPushButton("닫기")
-        close_btn.setStyleSheet("background-color: #333; color: white; border: none; padding: 6px;")
+        header = QHBoxLayout()
+        header.addWidget(DraggableHeader("팀원 전적  ·  이름을 눌러 고치고 Enter", self), 1)
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 22)
+        close_btn.setStyleSheet(f"color: {SUB}; background: transparent; border: none; font-size: 13px;")
         close_btn.clicked.connect(self.close)
-        layout.addWidget(close_btn)
+        header.addWidget(close_btn)
+        layout.addLayout(header)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(6)
+        self.rows = [TeammateRow(stats, refetch) for stats in team_stats]
+        for row in self.rows:
+            cards.addWidget(row)
+        layout.addLayout(cards)
+        footer = [
+            f"시즌 모스트 캐릭터의 최근 랭크 게임 판당 평균  ·  흐린 줄은 최근 {RELIABLE_GAMES - 1}판 이하라 참고용"
+            "  ·  아이콘에 마우스를 올리면 이름(무기)",
+            # IP 이용 정책: 공식 콘텐츠로 오인되지 않게 표기
+            "비공식 팬 도구  ·  캐릭터 이미지 © Nimble Neuron (공식 팬키트)",
+        ]
+        # 안내 문구가 창 폭을 정하지 않도록 카드들 폭에 맞춰 줄바꿈 (팀원이 1~2명이면 카드보다 훨씬 넓어졌음)
+        cards_width = max(1, len(team_stats)) * CARD_WIDTH + max(0, len(team_stats) - 1) * cards.spacing()
+        for text in footer:
+            label = _label(text, DIM, FONT_SMALL)
+            label.setWordWrap(True)
+            label.setFixedWidth(cards_width)
+            layout.addWidget(label)
 
         self.place_on_screen()
 
+    def update_teammate(self, position: int, stats: dict) -> None:
+        """조회가 진행되면 그 팀원 카드만 다시 그림. 표가 생기면 창이 아래로 늘어남."""
+        if 0 <= position < len(self.rows):
+            self.rows[position].show_stats(stats)
+
+    def save_position(self) -> None:
+        if not self._position_file:
+            return
+        try:
+            with open(self._position_file, "w", encoding="utf-8") as f:
+                json.dump({"x": self.x(), "y": self.y()}, f)
+        except OSError as e:
+            print(f"⚠️ 모달 위치 저장 실패: {e}")
+
+    def _saved_position(self) -> Optional[QPoint]:
+        if not self._position_file:
+            return None
+        try:
+            with open(self._position_file, encoding="utf-8") as f:
+                data = json.load(f)
+            return QPoint(int(data["x"]), int(data["y"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
     def place_on_screen(self) -> None:
-        """마우스가 있는 모니터(보통 게임 화면)의 오른쪽 위에 놓습니다.
+        """사용자가 옮겨 둔 위치가 있으면 거기, 없으면 마우스가 있는 모니터(보통 게임 화면)의 오른쪽 위.
 
         Qt 좌표는 Windows 배율이 적용된 논리 좌표라 고정 좌표를 쓰면 안 됨
         (예: 2880x1800 + 배율 200%는 논리 1440x900).
         """
+        self.ensurePolished()
+        self.adjustSize()
+        saved = self._saved_position()
+        # 저장한 위치의 모니터가 빠졌으면 무시. 팀원 수에 따라 폭이 달라서 화면 안으로 당김
+        screen = QGuiApplication.screenAt(saved) if saved is not None else None
+        if screen is not None:
+            geo = screen.availableGeometry()
+            x = max(geo.left(), min(saved.x(), geo.right() - self.width() + 1))
+            y = max(geo.top(), min(saved.y(), geo.bottom() - self.height() + 1))
+            self.move(x, y)
+            return
+
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is None:
             return
         geo = screen.availableGeometry()
-        self.adjustSize()
         width = min(self.width(), geo.width())
         height = min(self.height(), geo.height())
         x = max(geo.left(), geo.right() - width - SCREEN_MARGIN + 1)

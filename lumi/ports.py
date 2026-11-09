@@ -13,7 +13,7 @@ app.py는 이 인터페이스에만 의존하고, 실제 구현(어댑터)은 �
 | MatchSignals      | game.log.PlayerLog                          |
 """
 
-from typing import Iterator, Optional, Protocol
+from typing import Callable, Iterator, Optional, Protocol
 
 from PIL import Image
 
@@ -35,8 +35,13 @@ class NicknameReader(Protocol):
 
 
 class StatsProvider(Protocol):
-    def team_stats(self, ocr_results: list[dict]) -> list[dict]:
-        """OCR 결과로 닉네임을 확정하고 팀원별 전적 dict를 만듭니다."""
+    def team_stats(
+        self, ocr_results: list[dict], on_update: Optional[Callable[[int, dict], None]] = None
+    ) -> list[dict]:
+        """OCR 결과로 닉네임을 확정하고 팀원별 전적 dict를 만듭니다.
+
+        on_update(ocr_results 안의 위치, 전적): 일부를 받을 때마다 (stage 키가 있으면 아직 받는 중).
+        """
 
     def user_stats(self, nickname: str) -> Optional[dict]:
         """닉네임 한 명의 전적. 못 찾으면 None (모달에서 닉네임 수정 시)."""

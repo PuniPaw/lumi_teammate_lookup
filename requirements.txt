@@ -4,6 +4,7 @@ pywin32>=306; sys_platform == "win32"
 mss>=9.0.2
 Pillow>=12.0.0
 bserpy>=0.1.0
+httpx>=0.27
 python-dotenv>=1.0.0
 psutil>=6.0.0
 rapidocr>=3.10.0

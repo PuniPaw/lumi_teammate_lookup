@@ -4,3 +4,13 @@ __pycache__/
 .env
 .pytest_cache/
 /debug/
+/overlay_position.json
+# 팬키트 이미지는 재배포하지 않음. python -m lumi.debug.fankit_icons로 만듦
+lumi/assets/characters/
+
+# Cloudflare Worker (proxy/)
+proxy/.dev.vars
+proxy/.wrangler/
+node_modules/
+build/
+dist/

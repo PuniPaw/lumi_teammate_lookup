@@ -3,7 +3,8 @@
 
   1) 매칭 완료 신호 (MatchSignals)
   2) 닉네임이 다 그려질 때까지 캡처(ScreenSource) + OCR(NicknameReader) 재시도
-  3) 닉네임 확정 + 전적 조회 (StatsProvider) -> 모달 표시
+  3) 읽은 닉네임으로 모달을 바로 띄우고, 전적 조회(StatsProvider)가 진행되는 대로 카드를 채움
+     (랭크·시즌 통계 -> 최근 랭크 게임 순. 최근 게임은 페이지를 여러 번 넘겨 오래 걸림)
   4) 1초마다 닉네임 칸을 확인해 사라진 상태가 이어지면 모달 닫기
   새 매칭이 잡히면(닷지 후 재매칭 등) 기존 모달을 닫고 다시 진행합니다.
 
@@ -21,6 +22,7 @@ from typing import Optional
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
+from lumi.api.player_stats import pending_stats
 from lumi.config import Settings, load_settings
 from lumi.debug.store import DebugStore
 from lumi.game.match_flow import LobbyPresence, slot_ready, wait_for_teammates
@@ -44,7 +46,8 @@ class MatchWorker(QObject):
     """백그라운드 스레드에서 매칭 신호 대기 / OCR / 전적 조회."""
 
     match_detected = Signal()  # 새 매칭 (기존 모달 닫기용)
-    team_ready = Signal(list, list)  # (팀원 전적 목록, 게임 시작 감지용 기준 크롭)
+    team_started = Signal(int, list, list)  # (매칭 번호, 조회 전 팀원 카드 목록, 게임 시작 감지용 기준 크롭)
+    teammate_updated = Signal(int, int, object)  # (매칭 번호, 카드 위치, 그때까지의 전적 dict)
 
     def __init__(
         self,
@@ -131,28 +134,39 @@ class MatchWorker(QObject):
         for r in results:
             print(f"  {'✅' if slot_ready(r) else '⚠️'} {r['name']}: {r['best']!r} (점수 {r['confidence']})")
 
-        team_stats = self.stats.team_stats(lookup_targets(results))
-        if ready == len(results) and any(not s.get("user_id") for s in team_stats):
-            self.debug.save_screen(prefix, self.screen.snapshot)  # 읽었지만 확정 못 한 팀원
-        if superseded() or not team_stats:
-            return
-
+        targets = lookup_targets(results)
+        # 읽은 글자가 있는 칸만 카드가 됨 (team_stats도 글자가 없는 빈 칸은 결과에서 뺌)
+        card_of = {slot: pos for pos, slot in enumerate(i for i, r in enumerate(targets) if r.get("best"))}
         try:
             reference = self.screen.name_crops(refine=False)  # 게임 시작 감지는 항상 같은 위치를 비교
         except Exception:
             reference = [r["crop_image"] for r in results]
-        self.team_ready.emit(team_stats, reference)
+        self.team_started.emit(match_id, [pending_stats(r["best"]) for r in targets if r.get("best")], reference)
+
+        def on_update(slot: int, stats: dict) -> None:
+            if slot in card_of and not superseded():
+                self.teammate_updated.emit(match_id, card_of[slot], stats)
+
+        team_stats = self.stats.team_stats(targets, on_update=on_update)
+        if ready == len(results) and any(not s.get("user_id") for s in team_stats):
+            self.debug.save_screen(prefix, self.screen.snapshot)  # 읽었지만 확정 못 한 팀원
+        if not superseded():
+            print("✅ 전적 조회 완료")
 
 
 class OverlayController(QObject):
     """메인(Qt) 스레드에서 모달 표시/닫기."""
 
-    def __init__(self, screen: ScreenSource, stats: StatsProvider, debug: DebugStore):
+    def __init__(
+        self, screen: ScreenSource, stats: StatsProvider, debug: DebugStore, position_file: Optional[str] = None
+    ):
         super().__init__()
         self.screen = screen
         self.stats = stats
         self.debug = debug
+        self.position_file = position_file  # 사용자가 옮긴 모달 위치 (다음 매칭과 재실행에도 유지)
         self.window: Optional[OverlayWindow] = None
+        self.match_id: Optional[int] = None  # 지금 모달이 보여주는 매칭 (늦게 온 예전 매칭 결과를 버림)
         self.presence: Optional[LobbyPresence] = None
         self.timer = QTimer(self)
         self.timer.setInterval(PRESENCE_CHECK_INTERVAL_MS)
@@ -167,13 +181,19 @@ class OverlayController(QObject):
             self.window.close()
             self.window.deleteLater()
             self.window = None
+        self.match_id = None
 
     def on_match_detected(self) -> None:
         self.close_overlay("새 매칭")
 
-    def on_team_ready(self, team_stats: list, reference: list) -> None:
+    def on_teammate_updated(self, match_id: int, position: int, stats: dict) -> None:
+        if self.window is not None and match_id == self.match_id:
+            self.window.update_teammate(position, stats)
+
+    def on_team_started(self, match_id: int, team_stats: list, reference: list) -> None:
         self.close_overlay()
-        self.window = OverlayWindow(team_stats, refetch=self.stats.user_stats)
+        self.match_id = match_id
+        self.window = OverlayWindow(team_stats, refetch=self.stats.user_stats, position_file=self.position_file)
         self.window.show()
         self.window.raise_()
         if self.debug.enabled:
@@ -181,7 +201,7 @@ class OverlayController(QObject):
             print(f"  모달 위치=({geo.x()},{geo.y()}) 크기={geo.width()}x{geo.height()} (Qt 논리 좌표)")
         self.presence = LobbyPresence(reference)
         self.timer.start()
-        print("✅ 모달 표시")
+        print("✅ 모달 표시 (전적은 받는 대로 채움)")
 
     def _check_game_started(self) -> None:
         if self.window is None or not self.window.isVisible():  # 닫기 버튼으로 닫음
@@ -201,18 +221,19 @@ class OverlayController(QObject):
 
 def connect(worker: MatchWorker, controller: OverlayController) -> None:
     worker.match_detected.connect(controller.on_match_detected)
-    worker.team_ready.connect(controller.on_team_ready)
+    worker.team_started.connect(controller.on_team_started)
+    worker.teammate_updated.connect(controller.on_teammate_updated)
 
 
-def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
-    """설정으로 실제 구현(어댑터)을 만들어 조립합니다."""
+def build(settings: Settings, make_client) -> tuple[MatchWorker, OverlayController]:
+    """설정으로 실제 구현(어댑터)을 만들어 조립합니다. make_client: api.client.client_factory 결과."""
     from lumi.api.player_stats import EternalReturnStats
     from lumi.capture.screen import LiveScreen
     from lumi.game.log import PlayerLog
     from lumi.ocr.paddle import PaddleReader
 
     screen = LiveScreen(settings.game_window_title)
-    stats = EternalReturnStats(settings.api_key)
+    stats = EternalReturnStats(make_client)
     try:
         stats.load_character_names()
     except RuntimeError as e:
@@ -220,22 +241,25 @@ def build(settings: Settings) -> tuple[MatchWorker, OverlayController]:
     debug = DebugStore(settings.debug, settings.debug_dir)
 
     worker = MatchWorker(PlayerLog(settings.log_path), screen, PaddleReader(), stats, debug)
-    controller = OverlayController(screen, stats, debug)
+    controller = OverlayController(screen, stats, debug, settings.overlay_position_file)
     connect(worker, controller)
     return worker, controller
 
 
 def main() -> None:
+    from lumi.api.client import MISSING_API_MESSAGE, client_factory
+
     settings = load_settings()
-    if not settings.api_key:
-        print("❌ ETERNAL_RETURN_API_KEY가 설정되지 않았습니다. .env를 확인하세요.")
+    make_client = client_factory(settings)
+    if make_client is None:
+        print(f"❌ {MISSING_API_MESSAGE}")
         sys.exit(1)
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)  # Qt 이벤트 루프 중에도 Ctrl+C로 종료
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # 모달을 닫아도 감시는 계속
 
-    worker, _controller = build(settings)
+    worker, _controller = build(settings, make_client)
     worker.start()
     print("매칭을 기다리는 중... (Ctrl+C 또는 게임 종료 시 함께 종료)")
     sys.exit(app.exec())
