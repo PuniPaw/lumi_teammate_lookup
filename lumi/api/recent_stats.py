@@ -1,6 +1,9 @@
 """
 최근 N게임 캐릭터별 통계: 평균 딜량(damageToPlayer, 다른 플레이어에게 가한 총 피해량)과
 평균 TK(teamKill, 그 게임에서 팀 전체가 올린 킬 수).
+
+어떤 캐릭터를 보여줄지는 시즌 통계의 모스트(판수 순)로 정하고, 숫자는 최근 게임 중
+그 캐릭터로 한 판만으로 냅니다. 시즌 모스트를 모르면 최근 게임에서 많이 한 순.
 """
 
 from typing import Optional
@@ -50,39 +53,59 @@ def fetch_recent_games(
     return games[:count]
 
 
-def summarize_recent_games(games: list[dict], character_names: Optional[dict[int, str]] = None) -> dict:
-    """{"recent_games": 게임 수, "recent_characters": 많이 한 캐릭터 순으로 최대 MOST_CHARACTER_COUNT개}.
+def _character_row(code, played: list[dict], names: dict[int, str], season_games: Optional[int]) -> dict:
+    """캐릭터 한 줄. 최근 판이 없으면 평균은 None."""
+    n = len(played)
+    return {
+        "code": code,
+        "name": names.get(code) or f"코드{code}",
+        "season_games": season_games,
+        "games": n,
+        "avg_damage": sum(g.get("damageToPlayer") or 0 for g in played) / n if n else None,
+        "avg_team_kill": sum(g.get("teamKill") or 0 for g in played) / n if n else None,
+        "avg_rp": sum(g.get("mmrGain") or 0 for g in played) / n if n else None,
+    }
 
-    캐릭터마다 {"code", "name", "games", "avg_damage", "avg_team_kill", "avg_rp"}. 그 캐릭터로 한 게임만의 판당 평균
-    (avg_rp는 mmrGain, 랭크 게임에서 얻거나 잃은 RP).
-    판수가 같으면 더 최근에 한 캐릭터가 앞 (games는 최신순).
+
+def summarize_recent_games(
+    games: list[dict],
+    character_names: Optional[dict[int, str]] = None,
+    season_most: Optional[list[tuple[int, int]]] = None,
+) -> dict:
+    """{"recent_games": 게임 수, "recent_characters": 캐릭터별 줄}.
+
+    season_most: 시즌 통계의 모스트 [(캐릭터 코드, 시즌 판수)] (판수 순). 주면 이 캐릭터들을 이 순서로
+    보여주고, 최근 게임에서 안 한 캐릭터도 넣음 (games=0, 평균 None).
+    없으면 최근 게임에서 많이 한 캐릭터 최대 MOST_CHARACTER_COUNT개 (판수가 같으면 더 최근에 한 캐릭터가 앞).
+
+    캐릭터마다 {"code", "name", "season_games", "games", "avg_damage", "avg_team_kill", "avg_rp"}.
+    games와 평균은 그 캐릭터로 한 최근 게임만의 판당 값 (avg_rp는 mmrGain, 랭크 게임에서 얻거나 잃은 RP).
     """
     names = character_names or {}
     by_character: dict[int, list[dict]] = {}
     for game in games:
         by_character.setdefault(game.get("characterNum"), []).append(game)
-    ranked = sorted(by_character.items(), key=lambda item: -len(item[1]))[:MOST_CHARACTER_COUNT]
-    return {
-        "recent_games": len(games),
-        "recent_characters": [
-            {
-                "code": code,
-                "name": names.get(code) or f"코드{code}",
-                "games": len(played),
-                "avg_damage": sum(g.get("damageToPlayer") or 0 for g in played) / len(played),
-                "avg_team_kill": sum(g.get("teamKill") or 0 for g in played) / len(played),
-                "avg_rp": sum(g.get("mmrGain") or 0 for g in played) / len(played),
-            }
-            for code, played in ranked
-        ],
-    }
+    if season_most:
+        rows = [
+            _character_row(code, by_character.get(code, []), names, season_games)
+            for code, season_games in season_most[:MOST_CHARACTER_COUNT]
+        ]
+    else:
+        ranked = sorted(by_character.items(), key=lambda item: -len(item[1]))[:MOST_CHARACTER_COUNT]
+        rows = [_character_row(code, played, names, None) for code, played in ranked]
+    return {"recent_games": len(games), "recent_characters": rows}
 
 
 def get_recent_stats(
-    client, user_id, character_names: dict[int, str], count: int = RECENT_GAME_COUNT, season_id: Optional[int] = None
+    client,
+    user_id,
+    character_names: dict[int, str],
+    count: int = RECENT_GAME_COUNT,
+    season_id: Optional[int] = None,
+    season_most: Optional[list[tuple[int, int]]] = None,
 ) -> dict:
     games = fetch_recent_games(client, user_id, count=count, season_id=season_id) if count > 0 else []
-    return summarize_recent_games(games, character_names)
+    return summarize_recent_games(games, character_names, season_most)
 
 
 def empty_recent_stats() -> dict:
@@ -90,11 +113,15 @@ def empty_recent_stats() -> dict:
 
 
 def format_recent_stats(stats: dict) -> str:
-    """예: '최근 랭크 20게임\\n에스텔 4판  ·  딜량 15,223  ·  TK 9.4  ·  RP +12' (캐릭터마다 한 줄)"""
+    """예: '최근 랭크 20게임\n에스텔 (시즌 40판) 4판  ·  딜량 15,223  ·  TK 9.4  ·  RP +12' (캐릭터마다 한 줄)"""
     lines = [recent_games_title(stats)]
     for c in stats["recent_characters"]:
+        name = c["name"] if c.get("season_games") is None else f"{c['name']} (시즌 {c['season_games']}판)"
+        if not c["games"]:
+            lines.append(f"{name} 최근 기록 없음")
+            continue
         lines.append(
-            f"{c['name']} {c['games']}판  ·  딜량 {c['avg_damage']:,.0f}  ·  TK {c['avg_team_kill']:.1f}"
+            f"{name} {c['games']}판  ·  딜량 {c['avg_damage']:,.0f}  ·  TK {c['avg_team_kill']:.1f}"
             f"  ·  RP {c['avg_rp']:+.0f}"
         )
     return "\n".join(lines)

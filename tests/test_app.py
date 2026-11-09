@@ -145,6 +145,21 @@ def test_modal_lists_characters_and_says_when_no_ranked_games():
     assert row.table.isHidden()
 
 
+def test_modal_shows_season_most_with_recent_numbers():
+    QApplication.instance() or QApplication([])
+    played = {"code": 1, "name": "재키", "season_games": 40, "games": 4, "avg_damage": 15200, "avg_team_kill": 9.4, "avg_rp": 7}
+    unplayed = {"code": 2, "name": "아야", "season_games": 30, "games": 0, "avg_damage": None, "avg_team_kill": None, "avg_rp": None}
+    stats = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="골드 I", recent_games=4, recent_characters=[played, unplayed])
+    row = TeammateRow(stats, refetch=lambda n: None)
+    texts = [label.text() for label in row.table.findChildren(QLabel) if label.text()]
+    assert texts[:5] == ["시즌", "최근", "딜량", "TK", "RP"]
+    # 아이콘 파일이 없으면 아이콘 칸에 이름 앞 두 글자가 들어가서 숫자 칸만 비교
+    numbers = [t for t in texts[5:] if t not in ("재키", "아야")]
+    assert numbers == ["40", "4", "15.2k", "9.4", "+7", "30", "0", "–", "–", "–"]
+    tips = [label.toolTip() for label in row.table.findChildren(QLabel) if label.toolTip()]
+    assert tips == ["재키  ·  시즌 40판", "아야  ·  시즌 30판"]
+
+
 def test_moved_overlay_reopens_where_it_was_left(tmp_path):
     app = QApplication.instance() or QApplication([])
     path = str(tmp_path / "overlay_position.json")

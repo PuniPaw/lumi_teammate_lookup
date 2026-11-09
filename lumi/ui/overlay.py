@@ -45,6 +45,8 @@ RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 ICON_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "characters")
 ICON_SIZE = 26
 COLUMNS = ("", "판", "딜량", "TK", "RP")
+# 캐릭터를 시즌 모스트로 골랐을 때 (시즌 판수 칸 추가)
+SEASON_COLUMNS = ("", "시즌", "최근", "딜량", "TK", "RP")
 
 
 def _label(text: str = "", color: str = TEXT, size: int = FONT_BODY, bold: bool = False, align=None) -> QLabel:
@@ -84,7 +86,10 @@ def _character_cell(character: dict, reliable: bool) -> QLabel:
     """아이콘만 표시 (이름은 마우스를 올리면). 아이콘이 없는 캐릭터는 이름 앞 두 글자."""
     pixmap = character_icon(character["code"])
     cell = CharacterIcon()
-    cell.setToolTip(character["name"])
+    tooltip = character["name"]
+    if character.get("season_games") is not None:
+        tooltip += f"  ·  시즌 {character['season_games']}판"
+    cell.setToolTip(tooltip)
     if pixmap is not None:
         cell.setPixmap(pixmap)
     else:
@@ -179,24 +184,33 @@ class TeammateRow(QFrame):
         self.table.setVisible(bool(characters))
         if not characters:
             return
-        for col, title in enumerate(COLUMNS):
+        from_season = any(c.get("season_games") is not None for c in characters)
+        columns = SEASON_COLUMNS if from_season else COLUMNS
+        for col, title in enumerate(columns):
             self.table_layout.addWidget(_label(title, DIM, FONT_SMALL, align=RIGHT), 0, col)
         for row, c in enumerate(characters, start=1):
             reliable = c["games"] >= RELIABLE_GAMES
             main, sub = (TEXT, SUB) if reliable else (DIM, DIM)
-            rp_color = (GAIN if c["avg_rp"] >= 0 else LOSS) if reliable else DIM
-            cells = [
-                _character_cell(c, reliable),
-                _label(str(c["games"]), sub, align=RIGHT),
-                _label(f"{c['avg_damage'] / 1000:.1f}k", main, bold=reliable, align=RIGHT),
-                _label(f"{c['avg_team_kill']:.1f}", sub, align=RIGHT),
-                _label(f"{c['avg_rp']:+.0f}", rp_color, align=RIGHT),
-            ]
+            cells = [_character_cell(c, reliable)]
+            if from_season:
+                # 시즌 판수는 최근 판수와 상관없이 믿을 만해서 흐리게 하지 않음
+                cells.append(_label(str(c["season_games"] or 0), SUB, align=RIGHT))
+            if c["games"]:
+                rp_color = (GAIN if c["avg_rp"] >= 0 else LOSS) if reliable else DIM
+                cells += [
+                    _label(str(c["games"]), sub, align=RIGHT),
+                    _label(f"{c['avg_damage'] / 1000:.1f}k", main, bold=reliable, align=RIGHT),
+                    _label(f"{c['avg_team_kill']:.1f}", sub, align=RIGHT),
+                    _label(f"{c['avg_rp']:+.0f}", rp_color, align=RIGHT),
+                ]
+            else:  # 시즌 모스트지만 최근 게임에서는 안 함
+                cells += [_label("0", DIM, align=RIGHT)] + [_label("–", DIM, align=RIGHT) for _ in range(3)]
             for col, cell in enumerate(cells):
                 self.table_layout.addWidget(cell, row, col)
-        # 아이콘 칸은 고정, 숫자 칸들이 남은 폭을 똑같이 나눔 (아이콘과 숫자 사이가 벌어지지 않게)
-        for col in range(1, len(COLUMNS)):
-            self.table_layout.setColumnStretch(col, 1)
+        # 아이콘 칸은 고정, 숫자 칸들이 남은 폭을 똑같이 나눔 (아이콘과 숫자 사이가 벌어지지 않게).
+        # 재조회로 칸 수가 줄어도 남은 칸이 늘어나지 않게 전부 다시 설정
+        for col in range(1, len(SEASON_COLUMNS)):
+            self.table_layout.setColumnStretch(col, 1 if col < len(columns) else 0)
 
     def _on_nickname_submitted(self) -> None:
         nickname = self.nickname_edit.text().strip()
@@ -274,7 +288,7 @@ class OverlayWindow(QWidget):
         layout.addLayout(cards)
         layout.addWidget(
             _label(
-                f"최근 랭크 게임의 캐릭터별 판당 평균  ·  흐린 줄은 {RELIABLE_GAMES - 1}판 이하라 참고용"
+                f"시즌 모스트 캐릭터의 최근 랭크 게임 판당 평균  ·  흐린 줄은 최근 {RELIABLE_GAMES - 1}판 이하라 참고용"
                 "  ·  아이콘에 마우스를 올리면 이름",
                 DIM,
                 FONT_SMALL,

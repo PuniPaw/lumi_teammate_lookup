@@ -82,6 +82,7 @@ def fetch_user_stats(
     except Exception as e:  # 랭크 기록이 없으면 라이브러리가 KeyError 등을 냄
         print(f"  {nickname}: 랭크 기록 없음 ({e!r}) -> 언랭크")
 
+    season_most: list[tuple[int, int]] = []  # 시즌 모스트 (캐릭터 코드, 시즌 판수), 판수 순
     try:
         season = next(iter(client.users.get_stats(user_id, season_id=season_id)), None)
         if season is not None:
@@ -92,6 +93,8 @@ def fetch_user_stats(
                 top3=season.top3 * 100,
                 average_rank=round(season.average_rank, 1),
             )
+            most = sorted(season.character_stats or [], key=lambda c: -c.total_games)
+            season_most = [(c.character_code, c.total_games) for c in most]
     except Exception as e:
         stats["games"] = None  # 0은 '시즌 기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 시즌 통계 조회 실패 ({e!r})")
@@ -100,7 +103,12 @@ def fetch_user_stats(
         # 시즌 랭크가 RECENT_GAME_COUNT보다 적으면 그 판수만큼만 찾음 (시즌 통계를 못 받았으면 RECENT_GAME_COUNT)
         season_games = stats["games"]
         count = RECENT_GAME_COUNT if season_games is None else min(RECENT_GAME_COUNT, season_games)
-        stats.update(get_recent_stats(client, user_id, character_names, count=count, season_id=season_id))
+        # 캐릭터는 시즌 모스트에서, 숫자는 최근 게임에서 (시즌 통계를 못 받았으면 최근 게임에서 많이 한 순)
+        stats.update(
+            get_recent_stats(
+                client, user_id, character_names, count=count, season_id=season_id, season_most=season_most
+            )
+        )
     except Exception as e:
         stats["recent_games"] = None  # 0은 '기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 최근 게임 조회 실패 ({e!r})")

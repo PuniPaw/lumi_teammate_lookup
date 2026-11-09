@@ -96,8 +96,8 @@ def test_damage_is_averaged_per_character():
     assert stats == {
         "recent_games": 3,
         "recent_characters": [
-            {"code": 1, "name": "재키", "games": 2, "avg_damage": 15000, "avg_team_kill": 5.5, "avg_rp": 0},
-            {"code": 2, "name": "아야", "games": 1, "avg_damage": 30000, "avg_team_kill": 9, "avg_rp": 0},
+            {"code": 1, "name": "재키", "season_games": None, "games": 2, "avg_damage": 15000, "avg_team_kill": 5.5, "avg_rp": 0},
+            {"code": 2, "name": "아야", "season_games": None, "games": 1, "avg_damage": 30000, "avg_team_kill": 9, "avg_rp": 0},
         ],
     }
 
@@ -106,6 +106,25 @@ def test_most_characters_are_capped_and_ties_favor_recent():
     games = [_game(i, character=c) for i, c in enumerate([7, 6, 5, 4, 3, 2, 1, 1])]
     names = [c["name"] for c in summarize_recent_games(games)["recent_characters"]]
     assert names == ["코드1", "코드7", "코드6", "코드5", "코드4"]
+
+
+def test_season_most_picks_characters_and_recent_games_give_numbers():
+    games = [
+        dict(_game(1, character=1, damage=10000, team_kill=4), mmrGain=20),
+        _game(2, character=9, damage=99999),  # 시즌 모스트가 아니면 안 보임
+        dict(_game(3, character=1, damage=20000, team_kill=8), mmrGain=-10),
+    ]
+    stats = summarize_recent_games(games, {1: "재키", 2: "아야"}, season_most=[(2, 50), (1, 40)])
+    assert stats["recent_games"] == 3
+    aya, jackie = stats["recent_characters"]  # 시즌 판수 순
+    assert (aya["name"], aya["season_games"], aya["games"], aya["avg_damage"]) == ("아야", 50, 0, None)
+    assert (jackie["season_games"], jackie["games"], jackie["avg_damage"], jackie["avg_team_kill"], jackie["avg_rp"]) == (
+        40, 2, 15000, 6, 5,
+    )
+    assert format_recent_stats(stats) == (
+        "최근 랭크 3게임\n아야 (시즌 50판) 최근 기록 없음\n"
+        "재키 (시즌 40판) 2판  ·  딜량 15,000  ·  TK 6.0  ·  RP +5"
+    )
 
 
 def test_summarize_handles_missing_fields_and_empty():

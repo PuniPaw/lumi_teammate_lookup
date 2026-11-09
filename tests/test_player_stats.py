@@ -52,7 +52,27 @@ def test_fetch_user_stats():
     assert (stats["tier"], stats["mmr"]) == ("다이아몬드 II", 5780)
     assert (stats["games"], round(stats["top1"]), stats["average_rank"]) == (120, 14, 4.3)
     assert stats["recent_games"] == 1
-    assert stats["recent_characters"] == [{"code": 1, "name": "재키", "games": 1, "avg_damage": 12000, "avg_team_kill": 8, "avg_rp": 0}]
+    assert stats["recent_characters"] == [
+        {"code": 1, "name": "재키", "season_games": 40, "games": 1, "avg_damage": 12000, "avg_team_kill": 8, "avg_rp": 0}
+    ]
+
+
+def test_most_characters_come_from_season_stats():
+    users = FakeUsers()
+    chars = [SimpleNamespace(character_code=c, total_games=g) for c, g in ((2, 30), (1, 40), (3, 5))]
+    users.get_stats = lambda user_id, season_id: [
+        SimpleNamespace(total_games=75, top1=0.1, top2=0.1, top3=0.1, average_rank=4.0, character_stats=chars)
+    ]
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키", 2: "아야"})
+    rows = [(c["code"], c["season_games"], c["games"]) for c in stats["recent_characters"]]
+    assert rows == [(1, 40, 1), (2, 30, 0), (3, 5, 0)]  # 시즌 판수 순, 최근 판수는 최근 게임에서
+
+
+def test_failed_season_lookup_falls_back_to_recent_characters():
+    users = FakeUsers()
+    users.get_stats = Mock(side_effect=RateLimitError("Too Many Requests"))
+    stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
+    assert [(c["name"], c["season_games"], c["games"]) for c in stats["recent_characters"]] == [("재키", None, 1)]
 
 
 def test_fetch_user_stats_without_rank():
@@ -96,7 +116,8 @@ def test_player_without_recent_games_is_shown_as_no_record():
     users = FakeUsers()
     users._t = SimpleNamespace(get=lambda path, **kw: {"userGames": []})
     stats = player_stats.fetch_user_stats(SimpleNamespace(users=users), "PuniPaw", 31, {1: "재키"})
-    assert format_recent_stats(stats) == "최근 랭크 기록 없음"
+    # 시즌 모스트는 최근 게임이 없어도 줄로 남음
+    assert format_recent_stats(stats) == "최근 랭크 기록 없음\n재키 (시즌 40판) 최근 기록 없음"
 
 
 class FakeClient:
