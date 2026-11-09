@@ -14,7 +14,7 @@ pytest.importorskip("PySide6.QtWidgets")
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from conftest import fixture  # noqa: E402
-from lumi.api.player_stats import failed_stats  # noqa: E402
+from lumi.api.player_stats import STAGE_RECENT, failed_stats, pending_stats  # noqa: E402
 from lumi.app import MatchWorker, OverlayController, connect  # noqa: E402
 from lumi.capture.screen import ImageScreen  # noqa: E402
 from lumi.debug.store import DebugStore  # noqa: E402
@@ -53,9 +53,13 @@ class FakeStats:
     def __init__(self):
         self.seen = []
 
-    def team_stats(self, ocr_results):
+    def team_stats(self, ocr_results, on_update=None):
         self.seen = [r["best"] for r in ocr_results]
-        return [failed_stats(n) for n in self.seen]
+        team = [dict(failed_stats(n), user_id=f"uid-{n}", tier="골드 I") for n in self.seen]
+        for i, stats in enumerate(team):
+            if on_update:
+                on_update(i, stats)
+        return team
 
     def user_stats(self, nickname):
         return None
@@ -88,8 +92,12 @@ def test_match_shows_modal_then_closes_when_game_starts(tmp_path):
     signals.send()
     assert _wait_until(app, lambda: controller.window is not None), "모달이 뜨지 않음"
     assert worker.current_match_id() == 1
-    assert stats.seen == ["PuniPaw", "로즈만때리는루크", "마브하라"]
     assert controller.window.isVisible()
+    # 조회가 끝나면 같은 창의 카드가 채워짐
+    rows = controller.window.rows
+    assert _wait_until(app, lambda: all(r.tier_line.text() == "골드 I" for r in rows)), "카드가 채워지지 않음"
+    assert stats.seen == ["PuniPaw", "로즈만때리는루크", "마브하라"]
+    assert [r.nickname_edit.text() for r in rows] == ["PuniPaw", "로즈만때리는루크", "마브하라"]
 
     # 캐릭터 선택 중 (같은 화면) -> 계속 떠 있음
     for _ in range(10):
@@ -160,6 +168,27 @@ def test_modal_shows_season_most_with_recent_numbers():
     assert tips == ["재키  ·  시즌 40판", "아야  ·  시즌 30판"]
 
 
+def test_weapon_rows_show_weapon_on_hover_and_share_season_count():
+    QApplication.instance() or QApplication([])
+
+    def row(weapon, games):
+        return {"code": 9, "name": "아야", "weapon": weapon, "season_games": 50, "games": games,
+                "avg_damage": 15000, "avg_team_kill": 8, "avg_rp": 3}
+
+    stats = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="골드 I", recent_games=5,
+                 recent_characters=[row("권총", 3), row("저격총", 2)])
+    card = TeammateRow(stats, refetch=lambda n: None)
+    layout = card.table_layout
+    cells = {}
+    for i in range(layout.count()):
+        r, c, rows, _ = layout.getItemPosition(i)
+        cells.setdefault(c, []).append((r, rows, layout.itemAt(i).widget()))
+    assert [w.toolTip() for _, _, w in cells[0][1:]] == ["아야(권총)  ·  시즌 50판", "아야(저격총)  ·  시즌 50판"]
+    assert [(r, rows, w.text()) for r, rows, w in cells[1][1:]] == [(1, 2, "50")]  # 시즌 판수는 한 칸으로 걸침
+    assert [w.text() for _, _, w in cells[2][1:]] == ["3", "2"]
+    assert "권총" not in [label.text() for label in card.table.findChildren(QLabel)]  # 무기는 표에 글자로 안 씀
+
+
 def test_moved_overlay_reopens_where_it_was_left(tmp_path):
     app = QApplication.instance() or QApplication([])
     path = str(tmp_path / "overlay_position.json")
@@ -185,6 +214,35 @@ def test_saved_position_off_every_screen_falls_back_to_top_right(tmp_path):
     path.write_text("not json", encoding="utf-8")
     window = OverlayWindow([failed_stats("PuniPaw")], refetch=lambda n: None, position_file=str(path))
     assert window.frameGeometry().right() >= screen.right() - 100
+
+
+def test_cards_fill_in_as_lookup_progresses():
+    QApplication.instance() or QApplication([])
+    window = OverlayWindow([pending_stats("PuniPaw")], refetch=lambda n: None)
+    row = window.rows[0]
+    assert row.tier_line.text() == "조회 중..."
+    assert row.recent_line.isHidden() and row.table.isHidden()
+
+    basic = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="골드 I", mmr=3100, games=40)
+    window.update_teammate(0, dict(basic, stage=STAGE_RECENT))
+    assert row.tier_line.text().startswith("골드 I")
+    assert row.recent_line.text() == "최근 랭크 게임 불러오는 중..."
+
+    character = {"code": 1, "name": "재키", "games": 4, "avg_damage": 15200, "avg_team_kill": 9.4, "avg_rp": -12}
+    window.update_teammate(0, dict(basic, recent_games=4, recent_characters=[character]))
+    assert row.recent_line.text() == "최근 랭크 4게임"
+    assert not row.table.isHidden()
+
+
+def test_late_lookup_does_not_overwrite_a_corrected_nickname():
+    QApplication.instance() or QApplication([])
+    corrected = dict(failed_stats("PuniPaw"), user_id="uid-1", tier="골드 I")
+    window = OverlayWindow([pending_stats("PuniPaw1")], refetch=lambda n: corrected)
+    row = window.rows[0]
+    row.nickname_edit.setText("PuniPaw")
+    row.nickname_edit.returnPressed.emit()
+    window.update_teammate(0, failed_stats("PuniPaw1"))  # 처음 읽은 글자로 한 조회가 늦게 끝남
+    assert row.tier_line.text() == "골드 I"
 
 
 def test_card_of_unfound_player_does_not_claim_no_record():
@@ -242,7 +300,7 @@ def test_modal_stays_open_while_game_window_is_hidden(tmp_path):
     screen = ToggleScreen(fixture("test3.png"), active=True)
     controller = OverlayController(screen, FakeStats(), DebugStore(enabled=False, directory=str(tmp_path)))
     controller.timer.setInterval(50)
-    controller.on_team_ready([failed_stats("PuniPaw")], screen.name_crops(refine=False))
+    controller.on_team_started(1, [failed_stats("PuniPaw")], screen.name_crops(refine=False))
 
     # 가려진 동안 캡처되는 화면은 로비가 아님 -> 그래도 닫히지 않아야 함
     screen.active, screen.path = False, fixture("main.png")

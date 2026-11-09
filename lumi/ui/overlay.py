@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from lumi.api.player_stats import STAGE_LOOKUP, STAGE_RECENT
 from lumi.api.recent_stats import recent_games_title
 
 # 닉네임 -> 전적 dict (못 찾으면 None). 모달에서 닉네임을 고쳐 Enter를 누를 때 사용
@@ -83,10 +84,10 @@ class CharacterIcon(QLabel):
 
 
 def _character_cell(character: dict, reliable: bool) -> QLabel:
-    """아이콘만 표시 (이름은 마우스를 올리면). 아이콘이 없는 캐릭터는 이름 앞 두 글자."""
+    """아이콘만 표시 (이름과 무기는 마우스를 올리면). 아이콘이 없는 캐릭터는 이름 앞 두 글자."""
     pixmap = character_icon(character["code"])
     cell = CharacterIcon()
-    tooltip = character["name"]
+    tooltip = f"{character['name']}({character['weapon']})" if character.get("weapon") else character["name"]
     if character.get("season_games") is not None:
         tooltip += f"  ·  시즌 {character['season_games']}판"
     cell.setToolTip(tooltip)
@@ -131,6 +132,7 @@ class TeammateRow(QFrame):
     def __init__(self, stats: dict, refetch: Refetch):
         super().__init__()
         self._refetch = refetch
+        self._edited = False  # 사용자가 닉네임을 고쳐 재조회했으면 늦게 온 자동 조회 결과로 덮지 않음
         self.setFixedWidth(CARD_WIDTH)
         self.setStyleSheet(f"TeammateRow {{ background-color: {CARD}; border-radius: 8px; }}")
         layout = QVBoxLayout(self)
@@ -165,7 +167,20 @@ class TeammateRow(QFrame):
         layout.addWidget(self.status_line)
         self._apply_stats(stats)
 
+    def show_stats(self, stats: dict) -> None:
+        """조회가 진행되면서 오는 전적으로 카드를 다시 그림."""
+        if not self._edited:
+            self._apply_stats(stats)
+
     def _apply_stats(self, stats: dict) -> None:
+        stage = stats.get("stage")
+        if stage == STAGE_LOOKUP:
+            self.tier_line.setText("조회 중...")
+            self.tier_line.setStyleSheet(f"color: {SUB}; font-size: {FONT_TIER}px; background: transparent;")
+            self.detail_line.setText("")
+            self.recent_line.hide()
+            self._fill_table([])
+            return
         text, color = tier_text(stats)
         self.tier_line.setText(text)
         self.tier_line.setStyleSheet(
@@ -175,6 +190,10 @@ class TeammateRow(QFrame):
         found = bool(stats.get("user_id"))
         self.detail_line.setText(season_text(stats) if found else "이름을 고쳐 Enter를 누르면 다시 조회합니다")
         self.recent_line.setVisible(found)
+        if stage == STAGE_RECENT:
+            self.recent_line.setText("최근 랭크 게임 불러오는 중...")
+            self._fill_table([])
+            return
         self.recent_line.setText(recent_games_title(stats))
         self._fill_table(stats["recent_characters"] if found else [])
 
@@ -191,21 +210,27 @@ class TeammateRow(QFrame):
         for row, c in enumerate(characters, start=1):
             reliable = c["games"] >= RELIABLE_GAMES
             main, sub = (TEXT, SUB) if reliable else (DIM, DIM)
-            cells = [_character_cell(c, reliable)]
-            if from_season:
+            self.table_layout.addWidget(_character_cell(c, reliable), row, 0)
+            # 무기별로 나뉜 같은 캐릭터 줄은 붙어 있고, 시즌 판수는 무기를 나누지 않은 값이라 그 줄들에 한 칸으로 걸침
+            first = row == 1 or characters[row - 2]["code"] != c["code"]
+            span = next((i for i, d in enumerate(characters[row - 1:]) if d["code"] != c["code"]), len(characters) - row + 1)
+            if from_season and first:
                 # 시즌 판수는 최근 판수와 상관없이 믿을 만해서 흐리게 하지 않음
-                cells.append(_label(str(c["season_games"] or 0), SUB, align=RIGHT))
+                # 시즌 모스트(3개) 밖에서 최근 게임으로 채운 캐릭터는 시즌 판수를 모름
+                season = "–" if c["season_games"] is None else str(c["season_games"])
+                color = SUB if c["season_games"] is not None else DIM
+                self.table_layout.addWidget(_label(season, color, align=RIGHT), row, 1, span, 1)
             if c["games"]:
                 rp_color = (GAIN if c["avg_rp"] >= 0 else LOSS) if reliable else DIM
-                cells += [
+                numbers = [
                     _label(str(c["games"]), sub, align=RIGHT),
                     _label(f"{c['avg_damage'] / 1000:.1f}k", main, bold=reliable, align=RIGHT),
                     _label(f"{c['avg_team_kill']:.1f}", sub, align=RIGHT),
                     _label(f"{c['avg_rp']:+.0f}", rp_color, align=RIGHT),
                 ]
             else:  # 시즌 모스트지만 최근 게임에서는 안 함
-                cells += [_label("0", DIM, align=RIGHT)] + [_label("–", DIM, align=RIGHT) for _ in range(3)]
-            for col, cell in enumerate(cells):
+                numbers = [_label("0", DIM, align=RIGHT)] + [_label("–", DIM, align=RIGHT) for _ in range(3)]
+            for col, cell in enumerate(numbers, start=len(columns) - len(numbers)):
                 self.table_layout.addWidget(cell, row, col)
         # 아이콘 칸은 고정, 숫자 칸들이 남은 폭을 똑같이 나눔 (아이콘과 숫자 사이가 벌어지지 않게).
         # 재조회로 칸 수가 줄어도 남은 칸이 늘어나지 않게 전부 다시 설정
@@ -213,6 +238,7 @@ class TeammateRow(QFrame):
             self.table_layout.setColumnStretch(col, 1 if col < len(columns) else 0)
 
     def _on_nickname_submitted(self) -> None:
+        self._edited = True
         nickname = self.nickname_edit.text().strip()
         self.status_line.hide()
         self.detail_line.setText("조회 중...")
@@ -283,12 +309,13 @@ class OverlayWindow(QWidget):
 
         cards = QHBoxLayout()
         cards.setSpacing(6)
-        for stats in team_stats:
-            cards.addWidget(TeammateRow(stats, refetch))
+        self.rows = [TeammateRow(stats, refetch) for stats in team_stats]
+        for row in self.rows:
+            cards.addWidget(row)
         layout.addLayout(cards)
         footer = [
             f"시즌 모스트 캐릭터의 최근 랭크 게임 판당 평균  ·  흐린 줄은 최근 {RELIABLE_GAMES - 1}판 이하라 참고용"
-            "  ·  아이콘에 마우스를 올리면 이름",
+            "  ·  아이콘에 마우스를 올리면 이름(무기)",
             # IP 이용 정책: 공식 콘텐츠로 오인되지 않게 표기
             "비공식 팬 도구  ·  캐릭터 이미지 © Nimble Neuron (공식 팬키트)",
         ]
@@ -301,6 +328,11 @@ class OverlayWindow(QWidget):
             layout.addWidget(label)
 
         self.place_on_screen()
+
+    def update_teammate(self, position: int, stats: dict) -> None:
+        """조회가 진행되면 그 팀원 카드만 다시 그림. 표가 생기면 창이 아래로 늘어남."""
+        if 0 <= position < len(self.rows):
+            self.rows[position].show_stats(stats)
 
     def save_position(self) -> None:
         if not self._position_file:

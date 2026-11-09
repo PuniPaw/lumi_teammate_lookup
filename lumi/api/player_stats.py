@@ -6,7 +6,7 @@
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Callable, Optional
 
 from bserpy import AuthenticationError, RateLimitError, ServerError, TransportError
 from bserpy.utils import SeasonHelper
@@ -16,6 +16,11 @@ from lumi.api.recent_stats import RECENT_GAME_COUNT, empty_recent_stats, format_
 from lumi.api.resolve import resolve_teammate_names
 
 FAILED_TIER = "조회 실패"
+# 모달을 먼저 띄우고 단계별로 채움: 'stage'가 없으면 다 받은 전적
+STAGE_LOOKUP = "lookup"  # 닉네임만 있음 (유저/랭크/시즌 조회 중)
+STAGE_RECENT = "recent"  # 랭크와 시즌 통계까지 받음 (최근 게임 조회 중)
+# (팀원 위치, 그때까지의 전적 dict). 조회 스레드에서 불림
+TeamUpdate = Callable[[int, dict], None]
 _API_FAILURES = (AuthenticationError, RateLimitError, ServerError, TransportError)
 
 # (최소 MMR, 티어 이름). 위에서부터 처음 만족하는 티어.
@@ -56,17 +61,31 @@ def failed_stats(nickname: str) -> dict:
     }
 
 
+def pending_stats(nickname: str) -> dict:
+    """아직 조회하지 않은 팀원 (모달에 닉네임과 '조회 중'만 표시)."""
+    return dict(failed_stats(nickname), stage=STAGE_LOOKUP)
+
+
 def current_season_id(client) -> Optional[int]:
     season = SeasonHelper(client).current_season()
     return season["seasonID"] if season else None
 
 
 def fetch_user_stats(
-    client, nickname: str, season_id: int, character_names: dict[int, str], user_id: Optional[str] = None
+    client,
+    nickname: str,
+    season_id: int,
+    character_names: dict[int, str],
+    user_id: Optional[str] = None,
+    on_partial: Optional[Callable[[dict], None]] = None,
+    multi_weapon: frozenset[int] = frozenset(),
 ) -> dict:
     """닉네임 한 명의 전적 dict. 유저가 없으면 예외, 세부 조회 실패는 기본값으로 채움.
 
     user_id: 닉네임을 확정할 때 이미 얻었으면 넘겨서 같은 조회를 또 하지 않음.
+    on_partial: 랭크와 시즌 통계를 받은 직후 (stage=STAGE_RECENT) 한 번 불림. 최근 게임은 페이지를
+    여러 번 넘겨 오래 걸려서, 그 전에 모달에 티어부터 보여줌.
+    multi_weapon: 무기를 여러 종류 쓸 수 있는 캐릭터 코드 (이 캐릭터만 무기 이름을 붙임).
     """
     if user_id is None:
         user_id = client.users.get_uid(nickname).user_id
@@ -99,6 +118,9 @@ def fetch_user_stats(
         stats["games"] = None  # 0은 '시즌 기록 없음'이라 조회 실패와 구분함
         print(f"  {nickname}: 시즌 통계 조회 실패 ({e!r})")
 
+    if on_partial is not None:
+        on_partial(dict(stats, stage=STAGE_RECENT))
+
     try:
         # 시즌 랭크가 RECENT_GAME_COUNT보다 적으면 그 판수만큼만 찾음 (시즌 통계를 못 받았으면 RECENT_GAME_COUNT)
         season_games = stats["games"]
@@ -106,7 +128,8 @@ def fetch_user_stats(
         # 캐릭터는 시즌 모스트에서, 숫자는 최근 게임에서 (시즌 통계를 못 받았으면 최근 게임에서 많이 한 순)
         stats.update(
             get_recent_stats(
-                client, user_id, character_names, count=count, season_id=season_id, season_most=season_most
+                client, user_id, character_names, count=count, season_id=season_id, season_most=season_most,
+                multi_weapon=multi_weapon,
             )
         )
     except Exception as e:
@@ -126,15 +149,21 @@ class EternalReturnStats:
     def __init__(self, client_factory: ClientFactory):
         self._client = client_factory
         self.character_names: dict[int, str] = {}
+        self.multi_weapon: frozenset[int] = frozenset()
 
     def load_character_names(self) -> None:
-        """캐릭터 코드 -> 한글 이름(없으면 영문 이름). 실패하면 RuntimeError."""
+        """캐릭터 코드 -> 한글 이름(없으면 영문 이름)과 무기를 여러 종류 쓰는 캐릭터. 실패하면 RuntimeError."""
         try:
             with self._client() as client:
                 characters = client.meta.get_data("Character")
                 l10n = client.meta.get_l10n_parsed()
+                mastery = client.meta.get_data("CharacterMastery")
         except Exception as e:
             raise RuntimeError(f"캐릭터 이름 로드 실패: {e}") from e
+        # weapon1~4 중 안 쓰는 칸은 'None'
+        self.multi_weapon = frozenset(
+            row["code"] for row in mastery if sum(row.get(f"weapon{i}") not in (None, "None") for i in range(1, 5)) > 1
+        )
         for char in characters:
             code = char.get("code")
             name = l10n.get_character_name(code) or char.get("name")
@@ -144,33 +173,49 @@ class EternalReturnStats:
             raise RuntimeError("캐릭터 이름 데이터가 비어 있습니다.")
         print(f"✅ 캐릭터 이름 {len(self.character_names)}개 로드 완료")
 
-    def team_stats(self, ocr_results: list[dict]) -> list[dict]:
+    def team_stats(self, ocr_results: list[dict], on_update: Optional[TeamUpdate] = None) -> list[dict]:
         """확정하지 못한 칸도 OCR이 읽은 글자로 '조회 실패' 카드를 만듭니다.
 
         팀원을 동시에 조회합니다. 프록시를 거치면 요청 하나가 오래 걸려(docs/DEVELOPMENT_NOTES.md)
         순서대로 조회하면 모달이 너무 늦게 뜸. 결과 순서는 ocr_results와 같음.
+        on_update(ocr_results 안의 위치, 전적): 랭크·시즌을 받았을 때와 다 받았을 때 팀원마다 불림.
         """
         if not ocr_results:
             return []
         with self._client() as client:
             season_id = current_season_id(client)
         with ThreadPoolExecutor(max_workers=len(ocr_results)) as pool:
-            team = list(pool.map(lambda ocr: self._teammate_stats(ocr, season_id), ocr_results))
+            team = list(
+                pool.map(
+                    lambda item: self._teammate_stats(item[0], item[1], season_id, on_update), enumerate(ocr_results)
+                )
+            )
         return [stats for stats in team if stats is not None]
 
-    def _teammate_stats(self, ocr: dict, season_id: Optional[int]) -> Optional[dict]:
+    def _teammate_stats(
+        self, index: int, ocr: dict, season_id: Optional[int], on_update: Optional[TeamUpdate]
+    ) -> Optional[dict]:
         """팀원 한 명 (스레드마다 Client를 따로 씀). 읽은 글자도 없는 빈 칸이면 None."""
         nickname = None
+        result = None
+        partial = (lambda stats: on_update(index, stats)) if on_update else None
         try:
             with self._client() as client:
                 resolved = resolve_teammate_names(client, [ocr])[0]
                 nickname = resolved["resolved_nickname"]
                 if nickname and season_id is not None:
-                    return fetch_user_stats(client, nickname, season_id, self.character_names, resolved["user_id"])
+                    result = fetch_user_stats(
+                        client, nickname, season_id, self.character_names, resolved["user_id"], on_partial=partial,
+                        multi_weapon=self.multi_weapon,
+                    )
         except Exception as e:  # 한 명이 실패해도 나머지 팀원은 보여줌
             print(f"  '{nickname or ocr.get('best')}' 전적 조회 실패: {e!r}")
-        fallback = nickname or ocr.get("best") or ""
-        return failed_stats(fallback) if fallback else None
+        if result is None:
+            fallback = nickname or ocr.get("best") or ""
+            result = failed_stats(fallback) if fallback else None
+        if result is not None and on_update is not None:
+            on_update(index, result)
+        return result
 
     def user_stats(self, nickname: str) -> Optional[dict]:
         if not nickname.strip():
@@ -178,7 +223,9 @@ class EternalReturnStats:
         try:
             with self._client() as client:
                 season_id = current_season_id(client)
-                return fetch_user_stats(client, nickname, season_id, self.character_names) if season_id else None
+                if not season_id:
+                    return None
+                return fetch_user_stats(client, nickname, season_id, self.character_names, multi_weapon=self.multi_weapon)
         except Exception as e:
             print(f"재조회 실패: {e!r}")
             return None

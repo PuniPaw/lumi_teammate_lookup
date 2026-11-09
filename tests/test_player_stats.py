@@ -53,7 +53,7 @@ def test_fetch_user_stats():
     assert (stats["games"], round(stats["top1"]), stats["average_rank"]) == (120, 14, 4.3)
     assert stats["recent_games"] == 1
     assert stats["recent_characters"] == [
-        {"code": 1, "name": "재키", "season_games": 40, "games": 1, "avg_damage": 12000, "avg_team_kill": 8, "avg_rp": 0}
+        {"code": 1, "name": "재키", "weapon": None, "season_games": 40, "games": 1, "avg_damage": 12000, "avg_team_kill": 8, "avg_rp": 0}
     ]
 
 
@@ -157,6 +157,24 @@ def test_team_stats_with_unresolved_slot(monkeypatch):
     assert provider.user_stats("Nobody") is None
 
 
+def test_team_stats_reports_tier_before_recent_games(monkeypatch):
+    """모달을 먼저 띄우고 채우도록, 랭크·시즌을 받은 뒤와 다 받은 뒤에 팀원 위치와 함께 알림"""
+    monkeypatch.setattr(player_stats, "current_season_id", lambda client: 31)
+    updates = []
+    ocr = [
+        {"name": "teammate_1", "best": "", "candidates": [], "candidate_scores": {}},
+        {"name": "teammate_2", "best": "PuniPaw", "candidates": ["PuniPaw"], "candidate_scores": {"PuniPaw": 95}},
+        {"name": "teammate_3", "best": "Nobody", "candidates": ["Nobody"], "candidate_scores": {"Nobody": 90}},
+    ]
+    player_stats.EternalReturnStats(FakeClient).team_stats(ocr, on_update=lambda i, s: updates.append((i, s)))
+
+    puni = [s for i, s in updates if i == 1]
+    assert [s.get("stage") for s in puni] == [player_stats.STAGE_RECENT, None]
+    assert puni[0]["tier"] == "다이아몬드 II" and puni[0]["recent_characters"] == []  # 최근 게임은 아직
+    assert puni[1]["recent_games"] == 1
+    assert [(i, s["tier"], s.get("stage")) for i, s in updates if i != 1] == [(2, "조회 실패", None)]  # 빈 칸(0)은 없음
+
+
 def test_team_stats_runs_concurrently_and_keeps_order(monkeypatch):
     """프록시를 거치면 요청이 느려서 팀원을 동시에 조회함. 늦게 끝난 팀원도 제자리에 있어야 함"""
     monkeypatch.setattr(player_stats, "current_season_id", lambda client: 31)
@@ -172,7 +190,7 @@ def test_team_stats_runs_concurrently_and_keeps_order(monkeypatch):
     monkeypatch.setattr(player_stats, "resolve_teammate_names", resolve)
     used_ids = []
 
-    def fetch(client, nickname, season_id, character_names, user_id=None):
+    def fetch(client, nickname, season_id, character_names, user_id=None, on_partial=None, multi_weapon=frozenset()):
         used_ids.append(user_id)
         return player_stats.failed_stats(nickname)
 
