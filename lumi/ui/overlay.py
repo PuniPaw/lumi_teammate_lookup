@@ -286,16 +286,19 @@ class OverlayWindow(QWidget):
         for stats in team_stats:
             cards.addWidget(TeammateRow(stats, refetch))
         layout.addLayout(cards)
-        layout.addWidget(
-            _label(
-                f"시즌 모스트 캐릭터의 최근 랭크 게임 판당 평균  ·  흐린 줄은 최근 {RELIABLE_GAMES - 1}판 이하라 참고용"
-                "  ·  아이콘에 마우스를 올리면 이름",
-                DIM,
-                FONT_SMALL,
-            )
-        )
-        # IP 이용 정책: 공식 콘텐츠로 오인되지 않게 표기
-        layout.addWidget(_label("비공식 팬 도구  ·  캐릭터 이미지 © Nimble Neuron (공식 팬키트)", DIM, FONT_SMALL))
+        footer = [
+            f"시즌 모스트 캐릭터의 최근 랭크 게임 판당 평균  ·  흐린 줄은 최근 {RELIABLE_GAMES - 1}판 이하라 참고용"
+            "  ·  아이콘에 마우스를 올리면 이름",
+            # IP 이용 정책: 공식 콘텐츠로 오인되지 않게 표기
+            "비공식 팬 도구  ·  캐릭터 이미지 © Nimble Neuron (공식 팬키트)",
+        ]
+        # 안내 문구가 창 폭을 정하지 않도록 카드들 폭에 맞춰 줄바꿈 (팀원이 1~2명이면 카드보다 훨씬 넓어졌음)
+        cards_width = max(1, len(team_stats)) * CARD_WIDTH + max(0, len(team_stats) - 1) * cards.spacing()
+        for text in footer:
+            label = _label(text, DIM, FONT_SMALL)
+            label.setWordWrap(True)
+            label.setFixedWidth(cards_width)
+            layout.addWidget(label)
 
         self.place_on_screen()
 
