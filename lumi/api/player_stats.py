@@ -152,18 +152,14 @@ class EternalReturnStats:
         self.multi_weapon: frozenset[int] = frozenset()
 
     def load_character_names(self) -> None:
-        """캐릭터 코드 -> 한글 이름(없으면 영문 이름)과 무기를 여러 종류 쓰는 캐릭터. 실패하면 RuntimeError."""
+        """캐릭터 코드 -> 한글 이름(없으면 영문 이름)과 무기를 여러 종류 쓰는 캐릭터. 이름을 못 받으면 RuntimeError."""
         try:
             with self._client() as client:
                 characters = client.meta.get_data("Character")
                 l10n = client.meta.get_l10n_parsed()
-                mastery = client.meta.get_data("CharacterMastery")
         except Exception as e:
             raise RuntimeError(f"캐릭터 이름 로드 실패: {e}") from e
-        # weapon1~4 중 안 쓰는 칸은 'None'
-        self.multi_weapon = frozenset(
-            row["code"] for row in mastery if sum(row.get(f"weapon{i}") not in (None, "None") for i in range(1, 5)) > 1
-        )
+        self.multi_weapon = self._load_multi_weapon()
         for char in characters:
             code = char.get("code")
             name = l10n.get_character_name(code) or char.get("name")
@@ -172,6 +168,19 @@ class EternalReturnStats:
         if not self.character_names:
             raise RuntimeError("캐릭터 이름 데이터가 비어 있습니다.")
         print(f"✅ 캐릭터 이름 {len(self.character_names)}개 로드 완료")
+
+    def _load_multi_weapon(self) -> frozenset[int]:
+        """무기를 여러 종류 쓸 수 있는 캐릭터 코드. 못 받으면 빈 집합 (툴팁에 무기 이름만 안 붙음)."""
+        try:
+            with self._client() as client:
+                mastery = client.meta.get_data("CharacterMastery")
+        except Exception as e:
+            print(f"캐릭터별 무기 로드 실패, 무기 이름 없이 표시: {e!r}")
+            return frozenset()
+        # weapon1~4 중 안 쓰는 칸은 'None'
+        return frozenset(
+            row["code"] for row in mastery if sum(row.get(f"weapon{i}") not in (None, "None") for i in range(1, 5)) > 1
+        )
 
     def team_stats(self, ocr_results: list[dict], on_update: Optional[TeamUpdate] = None) -> list[dict]:
         """확정하지 못한 칸도 OCR이 읽은 글자로 '조회 실패' 카드를 만듭니다.

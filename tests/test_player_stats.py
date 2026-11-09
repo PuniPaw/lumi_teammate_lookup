@@ -217,3 +217,39 @@ def test_one_failed_teammate_keeps_the_others(monkeypatch):
     )
     team = player_stats.EternalReturnStats(FakeClient).team_stats([{"name": n, "best": n} for n in ("A", "B")])
     assert [(s["nickname"], s["tier"]) for s in team] == [("A", "골드 I"), ("B", "조회 실패")]
+
+
+def _meta_client(mastery_error=None):
+    """캐릭터 이름 데이터만 주는 가짜 Client. mastery_error를 주면 CharacterMastery 요청이 그 예외로 실패."""
+
+    def get_data(name):
+        if name == "Character":
+            return [{"code": 9, "name": "Aya"}, {"code": 33, "name": "Nicky"}]
+        if mastery_error:
+            raise mastery_error
+        return [
+            {"code": 9, "weapon1": "Pistol", "weapon2": "AssaultRifle", "weapon3": "SniperRifle", "weapon4": "None"},
+            {"code": 33, "weapon1": "Glove", "weapon2": "None", "weapon3": "None", "weapon4": "None"},
+        ]
+
+    client = Mock()
+    client.meta.get_data.side_effect = get_data
+    client.meta.get_l10n_parsed.return_value.get_character_name = {9: "아야", 33: "니키"}.get
+    client.__enter__ = lambda self: self
+    client.__exit__ = lambda self, *a: False
+    return lambda: client
+
+
+def test_characters_with_several_weapons_are_loaded_with_names():
+    provider = player_stats.EternalReturnStats(_meta_client())
+    provider.load_character_names()
+    assert provider.character_names == {9: "아야", 33: "니키"}
+    assert provider.multi_weapon == {9}
+
+
+def test_weapon_list_failure_keeps_character_names():
+    """프록시가 CharacterMastery를 막아도(403 path not allowed) 캐릭터 이름은 나와야 함"""
+    provider = player_stats.EternalReturnStats(_meta_client(mastery_error=RuntimeError("path not allowed")))
+    provider.load_character_names()
+    assert provider.character_names == {9: "아야", 33: "니키"}
+    assert provider.multi_weapon == frozenset()

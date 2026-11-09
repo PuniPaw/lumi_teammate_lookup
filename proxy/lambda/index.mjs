@@ -23,7 +23,7 @@ const ROUTES = [
   [/^\/v1\/rank\/uid\/[^/]+\/\d+\/\d+$/, 5 * 60], // 랭크/MMR
   [/^\/v2\/user\/stats\/uid\/[^/]+\/\d+\/\d+$/, 5 * 60], // 시즌 통계
   [/^\/v1\/user\/games\/uid\/[^/]+$/, 2 * 60], // 최근 게임 (?next=커서)
-  [/^\/v2\/data\/(Character|Season)$/, 24 * 3600], // 캐릭터 이름, 현재 시즌
+  [/^\/v2\/data\/(Character|CharacterMastery|Season)$/, 24 * 3600], // 캐릭터 이름, 캐릭터별 무기, 현재 시즌
   [/^\/v1\/l10n\/[A-Za-z]+$/, 24 * 3600], // 번역 파일 주소
 ];
 
